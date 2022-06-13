@@ -1,0 +1,10 @@
+*.txt
+*.csv
+*.mat
+*.pt
+*.pkl
+
+data/*
+src/__pycache__/*
+src/.DS_Store
+data/.DS_Store
