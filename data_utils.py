@@ -126,7 +126,17 @@ def get_fileSize(path):
     return int(bytes.decode(proc.communicate()[0]).split(' ')[0])
 
 def load_txt_df(file_path, type, load_raw=False, return_unique_ids=False, id_list=None, return_with_bad_names=False, nrows=None):
-    '''returns a dataframe, names in the dataframe that are "bad", and unique values that exist in the dataframe'''
+    ''' 
+    The load_txt_df is a complex function. There are 3 possible objects that the function can return:
+    - a pandas dataframe
+    - a dictionary of unique ids
+    - a list of ids whose names is unparsable
+
+   For each case the input file is loaded in chunks, and for each chunk, the values inside the chunk will be verified, 
+   and the dtypes of all values will be set corresponing to the specified column name. This assists the user as after 
+   calling this function, one can be assured that all the ids are of their correct data type
+
+    '''
     chunksize=100000 # set chunksize
     if load_raw==False or len(get_col_names(type))==6: # if there is a header on the first line of the txt file
         df_chunks = pd.read_csv(file_path, names=get_col_names(type), sep="\t", encoding='utf8', header = 0, chunksize=chunksize, nrows=nrows)
@@ -196,12 +206,14 @@ def preprocess_listen_events_df(df, type):
     return grouped_df
 
 def get_bad_name_ids(df, id_type):
+    '''returns a list of ids of type id_type whose name is unparsable'''
     col_name_id = id_type.replace('_id','_name')
     df=df[df[col_name_id]=='nan']
     bad_ids=[int(row[id_type]) for i, row in df.iterrows()] 
     return bad_ids
 
 def get_bad_ids(key_ids, ids_list, id_type):
+    '''returns a list of ids of type id_type whose id is not in the id_type file, but is in the list of all available ids'''
     found_ids=[]
     for list in ids_list:
         found_ids+=[int(x) for x in list if isinstance(x,int)]
@@ -211,6 +223,10 @@ def get_bad_ids(key_ids, ids_list, id_type):
     return result
 
 def filterLEs(input_path, type, output_path, bad_ids, cols_to_filter, load_raw=True, nrows=None):
+    ''' 
+    the filterLEs reads the LEs from a specified input file and filters the ids based on each 
+    list in bad_ids specified by the id column in cols_to_filter. After filtered the data is saved in the output path
+    '''
     chunksize=10000
     column_names=get_col_names(type='le')
     if load_raw==False:
@@ -254,9 +270,66 @@ def filterRaw(type, ids, df, output_path, fix_user_entires=False, artist_ids=Non
 
 
 
-def preprocess_raw(raw_path, preprocessed_path, nrows=None):
+def preprocess_raw(raw_path, preprocessed_path, nrows=None, overwrite=False):
+    """
+    The preprocess_raw function is the brains of the data manipulation required to form a fully connected graph of the LFM-1b dataset
+    With the raw directory, preprocessed directory, number of rows to sample, and an overwrite inidcator. 
+
+    This function makes a subset if and only if the nrows parameter is not a None. If not making a subset, this function reads the raw
+    file directory and stripts the listen events file of all ids of artists/tracks/albums/users whose name is unparsable, or whose id doesn't 
+    exist inside the respective artist/album/track/user file.
+
+    Once cleaned the listen events file is saved and the artist/album/track/user files are updated based on the existing unique ids 
+    in the cleaned listen events file
+    """
     
-    if nrows != None and os.path.exists(preprocessed_path+'/LFM-1b_LEs.txt') == False:
+    make_subset(raw_path, preprocessed_path, nrows=nrows, overwrite=overwrite)
+    condition=os.path.exists(preprocessed_path+'/LFM-1b_users.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_artists.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_albums.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_tracks.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_LEs.txt') == False
+    if condition == True or overwrite==True and nrows==None:
+        print('----------------------------                     Preprocessing Raw Files                     ----------------------------')
+        unique_le_ids = load_txt_df(raw_path+'/LFM-1b_LEs.txt', type='le', load_raw=True, return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
+        df, bad_artist_name_ids = load_txt_df(raw_path+'/LFM-1b_artists.txt', type='artist', load_raw=True, return_with_bad_names=True)
+        artist_artist_ids=df['artist_id'].unique().tolist()
+        df, bad_album_name_ids = load_txt_df(raw_path+'/LFM-1b_albums.txt', type='album', load_raw=True, return_with_bad_names=True)
+        album_album_ids=df['album_id'].unique().tolist()
+        album_artist_ids=df['artist_id'].unique().tolist()
+        df, bad_track_name_ids = load_txt_df(raw_path+'/LFM-1b_tracks.txt', type='track', load_raw=True, return_with_bad_names=True)
+        track_track_ids=df['track_id'].unique().tolist()
+        track_artist_ids=df['artist_id'].unique().tolist()
+        del df
+        print('----------------------------                     Getting Bad Ids                      ----------------------------')
+        total_bad_artist_ids = np.unique(get_bad_ids(artist_artist_ids, [album_artist_ids,track_artist_ids, unique_le_ids['artist_id']], 'artist_id')+bad_artist_name_ids)
+        total_bad_album_ids = np.unique(get_bad_ids(album_album_ids, [unique_le_ids['album_id']], id_type='album_id')+bad_album_name_ids)
+        total_bad_track_ids = np.unique(get_bad_ids(track_track_ids, [unique_le_ids['track_id']], id_type='track_id')+bad_track_name_ids)
+        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
+        filterLEs(raw_path+'/LFM-1b_LEs.txt', type='le', output_path=preprocessed_path+'/LFM-1b_LEs.txt', bad_ids=[total_bad_artist_ids,total_bad_album_ids,total_bad_track_ids], cols_to_filter=['artist_id','album_id','track_id'])
+        print('---------------------------- Loading Pre-Processed LEs   ----------------------------')
+        unique_le_ids = load_txt_df(preprocessed_path+'/LFM-1b_LEs.txt', type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id', 'user_id'])
+        print('----------------------------                 Filtering Original Users File                    ----------------------------')
+        df = load_txt_df(raw_path+'/LFM-1b_users.txt', type='user', load_raw=True)
+        filterRaw('user', unique_le_ids['user_id'], df, preprocessed_path+'/LFM-1b_users.txt', fix_user_entires=True)
+        print('----------------------------                 Filtering Original Artists File                    ----------------------------')
+        df = load_txt_df(raw_path+'/LFM-1b_artists.txt', type='artist', load_raw=True)
+        filterRaw('artist', unique_le_ids['artist_id'], df, preprocessed_path+'/LFM-1b_artists.txt')
+        print('----------------------------                 Filtering Original Albums File                    ----------------------------')
+        df = load_txt_df(raw_path+'/LFM-1b_albums.txt', type='album', load_raw=True)
+        filterRaw('album', unique_le_ids['album_id'], df, preprocessed_path+'/LFM-1b_albums.txt', artist_ids=unique_le_ids['artist_id'])
+        print('----------------------------                 Filtering Original Tracks File                    ----------------------------')
+        df = load_txt_df(raw_path+'/LFM-1b_tracks.txt', type='track', load_raw=True)
+        filterRaw('track', unique_le_ids['track_id'], df, preprocessed_path+'/LFM-1b_tracks.txt',artist_ids=unique_le_ids['artist_id'])
+        del df
+
+def make_subset(raw_path, preprocessed_path, nrows=None, overwrite=False):
+    '''
+    The make_subset function iis the preprocess_raw successor function in charge of making a subset of the raw files, 
+    instead of using the full database
+    
+    This function reads the raw file directory and stripts only the number of specified rows from the 
+    listen events file. All ids of artists/tracks/albums/users whose name is unparsable in this subset, or id doesn't 
+    exist inside the respective artist/album/track/user file are removed. Once cleaned the listen events file is saved 
+    and the artist/album/track/user files are updated based on the existing unique ids in the cleaned listen events file
+    '''
+    if (os.path.exists(preprocessed_path+'/LFM-1b_LEs.txt') == False or overwrite==True) and nrows != None:
         print(f'----------------------------                     Making Subset of Raw Files with the first {nrows} LEs                  ----------------------------')
         unique_le_ids = load_txt_df(raw_path+'/LFM-1b_LEs.txt', type='le', load_raw=True, return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
         df, bad_artist_name_ids = load_txt_df(raw_path+'/LFM-1b_artists.txt', type='artist', load_raw=True, return_with_bad_names=True)
@@ -268,22 +341,14 @@ def preprocess_raw(raw_path, preprocessed_path, nrows=None):
         track_track_ids=df['track_id'].unique().tolist()
         track_artist_ids=df['artist_id'].unique().tolist()
         del df
-        print('----------------------------                     Getting Bad Artist Ids                      ----------------------------')
+        print('----------------------------                     Getting Bad Ids                      ----------------------------')
         total_bad_artist_ids = np.unique(get_bad_ids(artist_artist_ids, [album_artist_ids,track_artist_ids, unique_le_ids['artist_id']], 'artist_id')+bad_artist_name_ids)
-        print(f'{len(total_bad_artist_ids)} total_bad_artist_ids')
-        print('----------------------------                     Getting Bad Album Ids                       ----------------------------')
         total_bad_album_ids = np.unique(get_bad_ids(album_album_ids, [unique_le_ids['album_id']], id_type='album_id')+bad_album_name_ids)
-        print(f'{len(total_bad_album_ids)} total_bad_album_ids')
-        print('----------------------------                     Getting Bad Track Ids                       ----------------------------')
         total_bad_track_ids = np.unique(get_bad_ids(track_track_ids, [unique_le_ids['track_id']], id_type='track_id')+bad_track_name_ids)
-        print(f'{len(total_bad_track_ids)} total_bad_track_ids')
         print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
         filterLEs(raw_path+'/LFM-1b_LEs.txt', type='le', output_path=preprocessed_path+'/LFM-1b_LEs.txt', bad_ids=[total_bad_artist_ids,total_bad_album_ids,total_bad_track_ids], cols_to_filter=['artist_id','album_id','track_id'], nrows=nrows)
         print('---------------------------- Loading Pre-Processed LEs   ----------------------------')
         unique_le_ids = load_txt_df(preprocessed_path+'/LFM-1b_LEs.txt', type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id', 'user_id'])
-        print('from FilteredLes')
-        for k, v in unique_le_ids.items():
-            print(k, len(v))
         print('----------------------------                 Filtering Original Users File                    ----------------------------')
         df = load_txt_df(raw_path+'/LFM-1b_users.txt', type='user', load_raw=True)
         filterRaw('user', unique_le_ids['user_id'], df, preprocessed_path+'/LFM-1b_users.txt', fix_user_entires=True)
@@ -298,57 +363,3 @@ def preprocess_raw(raw_path, preprocessed_path, nrows=None):
         filterRaw('track', unique_le_ids['track_id'], df, preprocessed_path+'/LFM-1b_tracks.txt',artist_ids=unique_le_ids['artist_id'])
         del df
         print(f'subset of first {nrows} LEs made!')
-
-        preprocess_raw_(raw_path, preprocessed_path)
-
-
-    
-
-
-
-
-def preprocess_raw_(raw_path, preprocessed_path):
-    if os.path.exists(preprocessed_path+'/LFM-1b_LEs.txt') == False:
-        print('----------------------------                     Preprocessing Raw Files                     ----------------------------')
-        unique_le_ids = load_txt_df(raw_path+'/LFM-1b_LEs.txt', type='le', load_raw=True, return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
-        df, bad_artist_name_ids = load_txt_df(raw_path+'/LFM-1b_artists.txt', type='artist', load_raw=True, return_with_bad_names=True)
-        artist_artist_ids=df['artist_id'].unique().tolist()
-        df, bad_album_name_ids = load_txt_df(raw_path+'/LFM-1b_albums.txt', type='album', load_raw=True, return_with_bad_names=True)
-        album_album_ids=df['album_id'].unique().tolist()
-        album_artist_ids=df['artist_id'].unique().tolist()
-        df, bad_track_name_ids = load_txt_df(raw_path+'/LFM-1b_tracks.txt', type='track', load_raw=True, return_with_bad_names=True)
-        track_track_ids=df['track_id'].unique().tolist()
-        track_artist_ids=df['artist_id'].unique().tolist()
-        del df
-        print('----------------------------                     Getting Bad Artist Ids                      ----------------------------')
-        total_bad_artist_ids = np.unique(get_bad_ids(artist_artist_ids, [album_artist_ids,track_artist_ids, unique_le_ids['artist_id']], 'artist_id')+bad_artist_name_ids)
-        print(f'{len(total_bad_artist_ids)} total_bad_artist_ids')
-        print('----------------------------                     Getting Bad Album Ids                       ----------------------------')
-        total_bad_album_ids = np.unique(get_bad_ids(album_album_ids, [unique_le_ids['album_id']], id_type='album_id')+bad_album_name_ids)
-        print(f'{len(total_bad_album_ids)} total_bad_album_ids')
-        print('----------------------------                     Getting Bad Track Ids                       ----------------------------')
-        total_bad_track_ids = np.unique(get_bad_ids(track_track_ids, [unique_le_ids['track_id']], id_type='track_id')+bad_track_name_ids)
-        print(f'{len(total_bad_track_ids)} total_bad_track_ids')
-        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
-        filterLEs(raw_path+'/LFM-1b_LEs.txt', type='le', output_path=preprocessed_path+'/LFM-1b_LEs.txt', bad_ids=[total_bad_artist_ids,total_bad_album_ids,total_bad_track_ids], cols_to_filter=['artist_id','album_id','track_id'])
-
-    condition=os.path.exists(preprocessed_path+'/LFM-1b_users.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_artists.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_albums.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_tracks.txt') == False
-    if condition:
-        print('---------------------------- Loading Pre-Processed LEs   ----------------------------')
-        unique_le_ids = load_txt_df(preprocessed_path+'/LFM-1b_LEs.txt', type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id', 'user_id'])
-        print('from FilteredLes')
-        for k, v in unique_le_ids.items():
-            print(k, len(v))
-        print('----------------------------                 Filtering Original Users File                    ----------------------------')
-        df = load_txt_df(raw_path+'/LFM-1b_users.txt', type='user', load_raw=True)
-        filterRaw('user', unique_le_ids['user_id'], df, preprocessed_path+'/LFM-1b_users.txt', fix_user_entires=True)
-        print('----------------------------                 Filtering Original Artists File                    ----------------------------')
-        df = load_txt_df(raw_path+'/LFM-1b_artists.txt', type='artist', load_raw=True)
-        filterRaw('artist', unique_le_ids['artist_id'], df, preprocessed_path+'/LFM-1b_artists.txt')
-        print('----------------------------                 Filtering Original Albums File                    ----------------------------')
-        df = load_txt_df(raw_path+'/LFM-1b_albums.txt', type='album', load_raw=True)
-        filterRaw('album', unique_le_ids['album_id'], df, preprocessed_path+'/LFM-1b_albums.txt', artist_ids=unique_le_ids['artist_id'])
-        print('----------------------------                 Filtering Original Tracks File                    ----------------------------')
-        df = load_txt_df(raw_path+'/LFM-1b_tracks.txt', type='track', load_raw=True)
-        filterRaw('track', unique_le_ids['track_id'], df, preprocessed_path+'/LFM-1b_tracks.txt',artist_ids=unique_le_ids['artist_id'])
-        del df

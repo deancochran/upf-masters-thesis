@@ -188,7 +188,7 @@ def train_model(model, optimizer,scheduler, train_loader, epochs, save_folder, m
 
     # save the model result
 
-    SAVE_RESULT_FOLDER= f"../results/lfm1b_{sampled_edge_type}"
+    SAVE_RESULT_FOLDER= f"results/lfm1b_{sampled_edge_type}"
     if not os.path.exists(SAVE_RESULT_FOLDER):
         os.makedirs(SAVE_RESULT_FOLDER, exist_ok=True)
     save_result_path = os.path.join(SAVE_RESULT_FOLDER, f"{model_name}.json")
@@ -256,7 +256,7 @@ r_hgnn = R_HGNN(graph=hg,
 
 for SAMPLED_EDGE_TYPE in ['listened_to_artist','listened_to_album','listened_to_track']:
     MODEL_NAME='R_HGNN'+'_'+SAMPLED_EDGE_TYPE
-    SAVE_MODEL_FOLDER = f"../save_model/'lfm1b'/{MODEL_NAME}"
+    SAVE_MODEL_FOLDER = f"save_model/'lfm1b'/{MODEL_NAME}"
     train_edge_idx, valid_edge_idx, test_edge_idx = get_predict_edge_index(
         hg,
         sample_edge_rate=SAMPLE_EDGE_RATE,

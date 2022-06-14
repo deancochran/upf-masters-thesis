@@ -7,8 +7,8 @@ from data_utils import CategoricalEncoder, IdentityEncoder, SequenceEncoder, add
 
 class LFM1b(DGLDataset):
     def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False):
-        self.root_dir = '../data/'+name
-        self.preprocessed_dir = '../data/'+name+'/preprocessed'
+        self.root_dir = 'data/'+name
+        self.preprocessed_dir = 'data/'+name+'/preprocessed'
         super().__init__(
             name=name, 
             url='http://drive.jku.at/ssf/s/readFile/share/1056/266403063659030189/publicLink/LFM-1b.zip', 
@@ -22,13 +22,17 @@ class LFM1b(DGLDataset):
     def download(self):
         """Download and extract Zip file from LFM1b"""
         if self.url is not None:
+
             zip_file_path = os.path.join(self.root_dir, self.name+'.zip')
-            extract_archive(download(self.url, path=zip_file_path, overwrite=False), self.root_dir, overwrite=False)
+            extract_archive(download(self.url, path=zip_file_path, overwrite=False, log=True), self.root_dir, overwrite=False)
             # LMF-1b_UGP.zip download
             # zip_file_path = os.path.join(self.root_dir, self.name+'_UGP.zip')
             # extract_archive(download('http://www.cp.jku.at/datasets/LFM-1b/LFM-1b_UGP.zip', path=zip_file_path, overwrite=False), self.root_dir, overwrite=False)
-            os.mkdir(self.preprocessed_dir)     
-            os.mkdir(self.save_dir)              
+            if not os.path.exists(self.preprocessed_dir):
+                os.mkdir(self.preprocessed_dir)     
+            if not os.path.exists(self.save_dir):
+                os.mkdir(self.save_dir)              
+            
                 
         else:
             raise Exception("self.url is None! This should point to the LastFM1b zip download path: 'http://drive.jku.at/ssf/s/readFile/share/1056/266403063659030189/publicLink/LFM-1b.zip'")
@@ -135,11 +139,12 @@ class LFM1b(DGLDataset):
                     le_df = preprocess_listen_events_df(df, type='track')
                     graph_data[('user', 'listened_to_track', 'track')]=(th.tensor(le_df['user_id'].values), th.tensor(le_df['track_id'].values))
                     edge_data_features[('user', 'listened_to_track', 'track')] = {col:encoder(le_df[col].values) for col, encoder in encoders.items()}
-                    
+
                     del le_df
                 else:
                     raise Exception('filename in processed directory is bad.. Filename:',filename)
             
+                
                 del df
             
             # LOOP FOR LFM-1b_UGP if it will be used...
