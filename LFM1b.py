@@ -1,9 +1,14 @@
 import os
+import sys
+import zipfile
+import requests
+import wget
 import torch as th
 from dgl import heterograph
 from dgl.data import DGLDataset, download, extract_archive
 from dgl.data.utils import save_graphs, load_graphs
 from data_utils import CategoricalEncoder, IdentityEncoder, SequenceEncoder, add_reverse_edges, load_txt_df, mapIds, preprocess_listen_events_df, preprocess_raw
+from tqdm import tqdm
 
 class LFM1b(DGLDataset):
     def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False):
@@ -22,12 +27,12 @@ class LFM1b(DGLDataset):
     def download(self):
         """Download and extract Zip file from LFM1b"""
         if self.url is not None:
-
-            zip_file_path = os.path.join(self.root_dir, self.name+'.zip')
-            extract_archive(download(self.url, path=zip_file_path, overwrite=False, log=True), self.root_dir, overwrite=False)
-            # LMF-1b_UGP.zip download
-            # zip_file_path = os.path.join(self.root_dir, self.name+'_UGP.zip')
-            # extract_archive(download('http://www.cp.jku.at/datasets/LFM-1b/LFM-1b_UGP.zip', path=zip_file_path, overwrite=False), self.root_dir, overwrite=False)
+            
+            extract_archive(download(self.url, path=os.path.join(self.root_dir, self.name+'.zip'), overwrite=False), self.root_dir, overwrite=False)
+            
+            # LMF-1b_UGP.zip download goes here if needed
+            # extract_archive(download(lfm1b_ugp_zip_url, path=os.path.join(self.root_dir, self.name+'_UGP.zip'), overwrite=False), self.root_dir, overwrite=False)
+            
             if not os.path.exists(self.preprocessed_dir):
                 os.mkdir(self.preprocessed_dir)     
             if not os.path.exists(self.save_dir):
