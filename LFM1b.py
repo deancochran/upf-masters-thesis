@@ -27,8 +27,7 @@ class LFM1b(DGLDataset):
     def download(self):
         """Download and extract Zip file from LFM1b"""
         if self.url is not None:
-            
-            extract_archive(download(self.url, path=os.path.join(self.root_dir, self.name+'.zip'), overwrite=False), self.root_dir, overwrite=False)
+            extract_archive(download(self.url, path=self.root_dir, overwrite=False), target_dir=self.root_dir+'/'+self.name, overwrite=False)
             
             # LMF-1b_UGP.zip download goes here if needed
             # extract_archive(download(lfm1b_ugp_zip_url, path=os.path.join(self.root_dir, self.name+'_UGP.zip'), overwrite=False), self.root_dir, overwrite=False)
