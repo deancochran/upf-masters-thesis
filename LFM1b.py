@@ -1,19 +1,19 @@
 import os
-import sys
-import zipfile
-import requests
-import wget
 import torch as th
 from dgl import heterograph
 from dgl.data import DGLDataset, download, extract_archive
 from dgl.data.utils import save_graphs, load_graphs
-from data_utils import CategoricalEncoder, IdentityEncoder, SequenceEncoder, add_reverse_edges, load_txt_df, mapIds, preprocess_listen_events_df, preprocess_raw
 from tqdm import tqdm
+from data_utils import CategoricalEncoder, IdentityEncoder, SequenceEncoder, add_reverse_edges, load_txt_df, mapIds, preprocess_listen_events_df, preprocess_raw, get_artist_genre_df
 
 class LFM1b(DGLDataset):
-    def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False):
+    def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False, nrows=None, overwrite=False):
         self.root_dir = 'data/'+name
         self.preprocessed_dir = 'data/'+name+'/preprocessed'
+        self.nrows=nrows
+        self.overwrite=overwrite
+        self.lfm1b_ugp_url='http://www.cp.jku.at/datasets/LFM-1b/LFM-1b_UGP.zip'
+        self.raw_ugp_dir='data/'+name+f'/{name}_UGP'
         super().__init__(
             name=name, 
             url='http://drive.jku.at/ssf/s/readFile/share/1056/266403063659030189/publicLink/LFM-1b.zip', 
@@ -27,10 +27,10 @@ class LFM1b(DGLDataset):
     def download(self):
         """Download and extract Zip file from LFM1b"""
         if self.url is not None:
-            extract_archive(download(self.url, path=self.root_dir, overwrite=False), target_dir=self.root_dir+'/'+self.name, overwrite=False)
-            
+            extract_archive(download(self.url, path = self.root_dir, overwrite = False), target_dir = self.root_dir+'/'+self.name, overwrite = self.overwrite)
             # LMF-1b_UGP.zip download goes here if needed
-            # extract_archive(download(lfm1b_ugp_zip_url, path=os.path.join(self.root_dir, self.name+'_UGP.zip'), overwrite=False), self.root_dir, overwrite=False)
+            extract_archive(download(self.lfm1b_ugp_url, path = self.root_dir, overwrite = False), target_dir = self.root_dir, overwrite = self.overwrite)
+            # extract_archive(download(lfm1b_ugp_zip_url, path=self.root_dir, overwrite=False), self.root_dir, overwrite=False)
             
             if not os.path.exists(self.preprocessed_dir):
                 os.mkdir(self.preprocessed_dir)     
@@ -57,17 +57,25 @@ class LFM1b(DGLDataset):
     def process(self):
         processed_condition = os.path.exists(os.path.join(self.save_dir+'/'+'lastfm1b.bin')) == False 
         if processed_condition == True:
-            preprocess_raw(self.raw_dir,self.preprocessed_dir, nrows=1000000)
+            preprocess_raw(self.raw_dir,self.preprocessed_dir, nrows=self.nrows, overwrite=self.overwrite)
             graph_data = {}
             edge_data_features = {}
             node_data_features = {}
             # device = th.device("cuda" if th.cuda.is_available() else "cpu") # this dataset only can be processed on cpu
             device = th.device("cpu")
             mappings={} # a id remapping for all the ids in the data base
-            for filename in ['LFM-1b_artists.txt', 'LFM-1b_albums.txt', 'LFM-1b_tracks.txt', 'LFM-1b_users.txt', 'LFM-1b_LEs.txt']:
+            for filename in ['genres_allmusic.txt', 'LFM-1b_artists.txt', 'LFM-1b_albums.txt', 'LFM-1b_tracks.txt', 'LFM-1b_users.txt', 'LFM-1b_LEs.txt']:
                 file_path=self.preprocessed_dir+'/'+filename
                 print('\t','-------------------',file_path.split('_')[-1],'-------------------')
-                if filename=='LFM-1b_artists.txt':
+                if filename=='genres_allmusic.txt':
+                    df = load_txt_df(file_path, type='genre')
+                    # -------------------------GENRE NODE FEATURES-------------------------
+                    # encoders={'genre_name': SequenceEncoder(device=device),}
+                    # node_data_features['genre'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
+                    id_encoder = CategoricalEncoder(device=device)
+                    node_data_features['genre'] = {'feat': id_encoder(df['genre_id'].values)}
+
+                elif filename=='LFM-1b_artists.txt':
                     # -------------------------ARTIST ID RE-MAPPING-------------------------
                     df = load_txt_df(file_path, type='artist')
                     mappings['artist_mapping'] = {int(id): i for i, id in enumerate(df['artist_id'])}
@@ -75,9 +83,13 @@ class LFM1b(DGLDataset):
                     # -------------------------ARTIST NODE FEATURES-------------------------
                     # encoders={'artist_name': SequenceEncoder(device=device),}
                     # node_data_features['artist'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = IdentityEncoder(dtype=th.float,device=device)
+                    id_encoder = CategoricalEncoder(device=device)
                     node_data_features['artist'] = {'feat': id_encoder(df['artist_id'].values)}
-
+                    # -------------------------ARTIST->GENRE EDGES-------------------------
+                    mappings['artist_name_mapping'] = {row['artist_name']: row['artist_id']  for i, row in df.iterrows()}
+                    df = get_artist_genre_df(self.raw_ugp_dir+'/LFM-1b_artist_genres_allmusic.txt', df['artist_name'].tolist(), mappings['artist_name_mapping'])
+                    graph_data[('artist', 'in_genre', 'genre')]=(th.tensor(df['artist_id'].values), th.tensor(df['genre_id'].values))
+                
                 elif filename=='LFM-1b_albums.txt':
                     df = load_txt_df(file_path, type='album')
                     # -------------------------ALBUM ID RE-MAPPING-------------------------
@@ -86,7 +98,7 @@ class LFM1b(DGLDataset):
                     # -------------------------ALBUM NODE FEATURES-------------------------
                     # encoders={'album_name': SequenceEncoder(device=device),}
                     # node_data_features['album'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = IdentityEncoder(dtype=th.float,device=device)
+                    id_encoder = CategoricalEncoder(device=device)
                     node_data_features['album'] = {'feat': id_encoder(df['album_id'].values)}
                     # -------------------------ALBUM->ARTIST EDGES-------------------------
                     graph_data[('album', 'produced_by', 'artist')]=(th.tensor(df['album_id'].values), th.tensor(df['artist_id'].values))
@@ -99,7 +111,7 @@ class LFM1b(DGLDataset):
                     # -------------------------TRACK NODE FEATURES-------------------------
                     # encoders={'track_name': SequenceEncoder(device=device),}
                     # node_data_features['track'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = IdentityEncoder(dtype=th.float,device=device)
+                    id_encoder = CategoricalEncoder(device=device)
                     node_data_features['track'] = {'feat': id_encoder(df['track_id'].values)}
                     # -------------------------TRACK->ARTIST EDGES-------------------------
                     graph_data[('track', 'preformed_by', 'artist')]=(th.tensor(df['track_id'].values), th.tensor(df['artist_id'].values))
@@ -118,7 +130,7 @@ class LFM1b(DGLDataset):
                     #     'registered_unixtime' : IdentityEncoder(dtype=th.long,device=device),
                     # }
                     # node_data_features['user'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = IdentityEncoder(dtype=th.float,device=device)
+                    id_encoder = CategoricalEncoder(device=device)
                     node_data_features['user'] = {'feat': id_encoder(df['user_id'].values)}
 
                 elif filename=='LFM-1b_LEs.txt':

@@ -1,4 +1,5 @@
 from email import header
+from lib2to3.pgen2.pgen import DFAState
 from re import X
 import subprocess
 from unittest import expectedFailure
@@ -68,21 +69,21 @@ def add_reverse_edges(hg, copy_ndata=True, copy_edata=True):
 
 def getType(col):
     '''returns dtype of a specified column name'''
-    if col in ['user_id', 'age', 'playcount', 'registered_unixtime','album_id', 'artist_id','track_id','last_played']:
+    if col in ['user_id', 'age', 'playcount', 'registered_unixtime','album_id', 'artist_id','track_id','last_played', 'genre_id']:
         return 'int'
     else:
         return 'str'
 
 def setType(x, col):
     '''returns a converted value corresponding to the specified column name'''
-    if col in ['user_id', 'age', 'playcount', 'registered_unixtime','album_id', 'artist_id','track_id','last_played']:
+    if col in ['user_id', 'age', 'playcount', 'registered_unixtime','album_id', 'artist_id','track_id','last_played', 'genre_id']:
         return int(x)
     else:
         return str(x)
 
 def isValid(x,col):
     '''returns bool if value corresponding to the specified column name is of the correct dtype'''
-    if col in ['user_id', 'age', 'playcount', 'registered_unixtime','album_id', 'artist_id','track_id','last_played']:
+    if col in ['user_id', 'age', 'playcount', 'registered_unixtime','album_id', 'artist_id','track_id','last_played', 'genre_id']:
         try:
             x=setType(x, col)
             return True
@@ -117,6 +118,8 @@ def get_col_names(type):
         return ['track_id', 'track_name', 'artist_id']
     elif type=='le':
         return ['user_id', 'artist_id', 'album_id', 'track_id', 'timestamp']
+    elif type=='genre':
+        return ['genre_id', 'genre_name']
     else:
         raise Exception('bad "type" parameter in get_col_names')
 
@@ -297,11 +300,10 @@ def preprocess_raw(raw_path, preprocessed_path, nrows=None, overwrite=False):
         track_track_ids=df['track_id'].unique().tolist()
         track_artist_ids=df['artist_id'].unique().tolist()
         del df
-        print('----------------------------                     Getting Bad Ids                      ----------------------------')
+        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
         total_bad_artist_ids = np.unique(get_bad_ids(artist_artist_ids, [album_artist_ids,track_artist_ids, unique_le_ids['artist_id']], 'artist_id')+bad_artist_name_ids)
         total_bad_album_ids = np.unique(get_bad_ids(album_album_ids, [unique_le_ids['album_id']], id_type='album_id')+bad_album_name_ids)
         total_bad_track_ids = np.unique(get_bad_ids(track_track_ids, [unique_le_ids['track_id']], id_type='track_id')+bad_track_name_ids)
-        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
         filterLEs(raw_path+'/LFM-1b_LEs.txt', type='le', output_path=preprocessed_path+'/LFM-1b_LEs.txt', bad_ids=[total_bad_artist_ids,total_bad_album_ids,total_bad_track_ids], cols_to_filter=['artist_id','album_id','track_id'])
         print('---------------------------- Loading Pre-Processed LEs   ----------------------------')
         unique_le_ids = load_txt_df(preprocessed_path+'/LFM-1b_LEs.txt', type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id', 'user_id'])
@@ -317,7 +319,18 @@ def preprocess_raw(raw_path, preprocessed_path, nrows=None, overwrite=False):
         print('----------------------------                 Filtering Original Tracks File                    ----------------------------')
         df = load_txt_df(raw_path+'/LFM-1b_tracks.txt', type='track', load_raw=True)
         filterRaw('track', unique_le_ids['track_id'], df, preprocessed_path+'/LFM-1b_tracks.txt',artist_ids=unique_le_ids['artist_id'])
+        print('----------------------------                 Loading Genres                    ----------------------------')
+        file_path=raw_path+'_UGP/genres_allmusic.txt'
+        df = pd.read_csv(file_path, names=['genre_name'])
+        df['genre_id']=df['genre_name'].index
+        df=df.reindex(columns=['genre_id', 'genre_name'])
+        output_path=preprocessed_path+'/genres_allmusic.txt'
+        df.to_csv(output_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
         del df
+        
+    
+
+
 
 def make_subset(raw_path, preprocessed_path, nrows=None, overwrite=False):
     '''
@@ -341,11 +354,10 @@ def make_subset(raw_path, preprocessed_path, nrows=None, overwrite=False):
         track_track_ids=df['track_id'].unique().tolist()
         track_artist_ids=df['artist_id'].unique().tolist()
         del df
-        print('----------------------------                     Getting Bad Ids                      ----------------------------')
+        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
         total_bad_artist_ids = np.unique(get_bad_ids(artist_artist_ids, [album_artist_ids,track_artist_ids, unique_le_ids['artist_id']], 'artist_id')+bad_artist_name_ids)
         total_bad_album_ids = np.unique(get_bad_ids(album_album_ids, [unique_le_ids['album_id']], id_type='album_id')+bad_album_name_ids)
         total_bad_track_ids = np.unique(get_bad_ids(track_track_ids, [unique_le_ids['track_id']], id_type='track_id')+bad_track_name_ids)
-        print('---------------------------- Filtering All Bad Ids From LEs and Collecting remaining "ids"   ----------------------------')
         filterLEs(raw_path+'/LFM-1b_LEs.txt', type='le', output_path=preprocessed_path+'/LFM-1b_LEs.txt', bad_ids=[total_bad_artist_ids,total_bad_album_ids,total_bad_track_ids], cols_to_filter=['artist_id','album_id','track_id'], nrows=nrows)
         print('---------------------------- Loading Pre-Processed LEs   ----------------------------')
         unique_le_ids = load_txt_df(preprocessed_path+'/LFM-1b_LEs.txt', type='le', return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id', 'user_id'])
@@ -361,5 +373,33 @@ def make_subset(raw_path, preprocessed_path, nrows=None, overwrite=False):
         print('----------------------------                 Filtering Original Tracks File                    ----------------------------')
         df = load_txt_df(raw_path+'/LFM-1b_tracks.txt', type='track', load_raw=True)
         filterRaw('track', unique_le_ids['track_id'], df, preprocessed_path+'/LFM-1b_tracks.txt',artist_ids=unique_le_ids['artist_id'])
+        print('----------------------------                 Loading Genres                    ----------------------------')
+        file_path=raw_path+'_UGP/genres_allmusic.txt'
+        df = pd.read_csv(file_path, names=['genre_name'])
+        df['genre_id']=df['genre_name'].index
+        df=df.reindex(columns=['genre_id', 'genre_name'])
+        output_path=preprocessed_path+'/genres_allmusic.txt'
+        df.to_csv(output_path, columns=get_col_names('genre'), sep="\t", encoding='utf8', mode='w', index=False, line_terminator='\n')
         del df
         print(f'subset of first {nrows} LEs made!')
+
+def get_artist_genre_df(artist_genres_allmusic_path, unique_artist_names, artist_name_to_id_mapping):
+    file=open(artist_genres_allmusic_path, 'r')
+    lines=file.readlines()
+    data={'artist_name':list(),'genre_id':list()}
+    for line in lines:
+        info=line.strip().split('\t')
+        name=str(info[0])
+        genre_list=np.array([int(x) for x in info[1:]])
+        if len(genre_list) != 0:
+            for genre in genre_list:
+                data['artist_name'].append(name)
+                data['genre_id'].append(genre)
+    df = pd.DataFrame(data)
+    df = df[df['artist_name'].isin(unique_artist_names)].copy()
+    df['artist_id']=df['artist_name'].apply(lambda x: artist_name_to_id_mapping[x])
+    return df
+
+
+    
+    

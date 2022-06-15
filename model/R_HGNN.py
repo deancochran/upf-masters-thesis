@@ -260,7 +260,6 @@ class R_HGNN(nn.Module):
         if relation_embedding is None:
             relation_embedding = {}
             for etype in self.relation_embedding:
-                print(f'assigning relation_embedding {self.relation_embedding[etype].flatten()} to etype')
                 relation_embedding[etype] = self.relation_embedding[etype].flatten()
 
         # graph convolution
