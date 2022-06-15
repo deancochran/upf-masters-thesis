@@ -262,8 +262,15 @@ class R_HGNN(nn.Module):
             for etype in self.relation_embedding:
                 relation_embedding[etype] = self.relation_embedding[etype].flatten()
 
+        
+
         # graph convolution
         for block, layer in zip(blocks, self.layers):
+            # print('relation_target_node_features')
+            # for key in relation_target_node_features.keys():
+            #     print(f'{key} relation_target_node_features', relation_target_node_features[key].shape)
+            # for key in relation_embedding.keys():
+            #     print(f'{key} relation_embedding', relation_embedding[key].shape)
             relation_target_node_features, relation_embedding = layer(block, relation_target_node_features,
                                                                       relation_embedding)
 

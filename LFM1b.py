@@ -162,13 +162,6 @@ class LFM1b(DGLDataset):
             
                 
                 del df
-            
-            # LOOP FOR LFM-1b_UGP if it will be used...
-            # self.raw_UGP_dir=self.raw_dir+'_UGP'
-            # for filename in ['LFM-1b_artists.txt', 'LFM-1b_albums.txt', 'LFM-1b_tracks.txt', 'LFM-1b_users.txt', 'LFM-1b_LEs.txt']:
-            #     file_path=self.preprocessed_dir+'/'+filename
-            #     print('\t','-------------------',file_path.split('_')[-1],'-------------------')
-
 
             # create graph data
             self.graph = heterograph(graph_data)

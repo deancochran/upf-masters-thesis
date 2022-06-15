@@ -15,6 +15,7 @@ from utils.LinkScorePredictor import LinkScorePredictor
 from utils.EarlyStopping import EarlyStopping
 from model.R_HGNN import R_HGNN
 from utils.utils import evaluate_link_prediction, get_predict_edge_index, set_random_seed, get_edge_data_loader, convert_to_gpu, get_optimizer_and_lr_scheduler, get_n_params
+th.cuda.empty_cache()
 
 
 def make_loss_plots(sample_edge_type, total_loss_vals, epochs, save_result_dir):
@@ -76,7 +77,7 @@ def evaluate(model, loader, loss_func, sampled_edge_type, device, mode):
             # target node relation representation in the heterogeneous graph
             input_features = {(stype, etype, dtype): blocks[0].srcnodes[dtype].data['feat'] for stype, etype, dtype in
                               blocks[0].canonical_etypes}
-
+                    
             nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features))
 
             positive_score = model[1](
@@ -133,6 +134,8 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
             input_features = {(stype, etype, dtype): blocks[0].srcnodes[dtype].data['feat'] for stype, etype, dtype in blocks[0].canonical_etypes}
             # for k,v in input_features.items():
             #     print(k,v.shape)
+            # relation_features = {etype: blocks[0].edges[etype].data['playcount'] for stype, etype, dtype in blocks[0].canonical_etypes}
+            # nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features), copy.deepcopy(relation_features))
             nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features))
             # for k,v in nodes_representation.items():
             #     print(k,v.shape)
@@ -329,15 +332,15 @@ if __name__ == '__main__':
     parser.add_argument('--nrows', default=None, type=int, help='name of models')
     parser.add_argument('--seed', default=0, type=int, help='seed for reproducibility')
     parser.add_argument('--sample_edge_rate', default=0.01, type=float, help='train: validate: test ratio')
-    parser.add_argument('--num_layers', default=2, type=int, help='number of convolutional layers for a model')
-    parser.add_argument('--batch_size', default='1024', type=int, help='the number of edges to train in each batch')
+    parser.add_argument('--num_layers', default=4, type=int, help='number of convolutional layers for a model')
+    parser.add_argument('--batch_size', default=512, type=int, help='the number of edges to train in each batch')
     parser.add_argument('--num_neg_samples', default=5, type=int, help='the number of negative edges to sample when training')
     parser.add_argument('--node_min_neighbors', default=10, type=int, help='the number of nodes to sample per target node')
     parser.add_argument('--shuffle',  default=True, type=bool, help='wether to shuffle indicies before splitting')
     parser.add_argument('--drop_last',  default=False, type=bool, help='wether to drop the last sample in data loading')
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for a specified data loader')
     parser.add_argument('--hidden_dim', default=32, type=int, help='dimension of the hidden layer input')
-    parser.add_argument('--rel_input_dim', default=20, type=int, help='input dimension of the edges')
+    parser.add_argument('--rel_input_dim', default=1, type=int, help='input dimension of the edges')
     parser.add_argument('--rel_hidden_dim', default=8, type=int, help='hidden dimension of the edges')
     parser.add_argument('--num_heads', default=8, type=int, help='the number of attention heads used')
     parser.add_argument('--dropout', default=0.3, type=float, help='the dropout rate for the models')

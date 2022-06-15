@@ -125,6 +125,9 @@ def get_predict_edge_index(graph: dgl.DGLGraph, sampled_edge_type: str or tuple,
     valid_edge_idx = permute_idx[3 * selected_edges_num: 4 * selected_edges_num]
     test_edge_idx = permute_idx[4 * selected_edges_num: 5 * selected_edges_num]
 
+    # print(f'size of train_edge_idx',len(train_edge_idx))
+    # print(f'size of valid_edge_idx',len(valid_edge_idx))
+    # print(f'size of test_edge_idx',len(test_edge_idx))
     return train_edge_idx, valid_edge_idx, test_edge_idx
 
 
