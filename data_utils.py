@@ -49,22 +49,6 @@ class IdentityEncoder(object):
 
 def add_reverse_edges(hg, copy_ndata=True, copy_edata=True):
     '''adds reverse edges with identical feartures for every edges in graph`'''
-    # canonical_etypes = hg.canonical_etypes
-    # num_nodes_dict = {ntype: hg.number_of_nodes(ntype) for ntype in hg.ntypes}
-    # edge_dict = {}
-    # for etype in canonical_etypes:
-    #     u, v = hg.edges(form='uv', order='eid', etype=etype)
-    #     edge_dict[etype] = (u, v)
-    #     edge_dict[(etype[2], etype[1] + '-rev', etype[0])] = (v, u)
-    # new_hg = heterograph(edge_dict, num_nodes_dict=num_nodes_dict)
-    # if copy_ndata:
-    #     node_frames = extract_node_subframes(hg, None)
-    #     set_new_frames(new_hg, node_frames=node_frames)
-    # if copy_edata:
-    #     for etype in canonical_etypes:
-    #         edge_frame = hg.edges[etype].data
-    #         for data_name, value in edge_frame.items():
-    #             new_hg.edges[etype].data[data_name] = value
     canonical_etypes = hg.canonical_etypes
     num_nodes_dict = {ntype: hg.number_of_nodes(ntype) for ntype in hg.ntypes}
     edge_dict = {}
@@ -73,18 +57,14 @@ def add_reverse_edges(hg, copy_ndata=True, copy_edata=True):
         edge_dict[etype] = (u, v)
         edge_dict[(etype[2], etype[1] + '-rev', etype[0])] = (v, u)
     new_hg = heterograph(edge_dict, num_nodes_dict=num_nodes_dict)
-
-    node_frames = extract_node_subframes(hg, None)
-    set_new_frames(new_hg, node_frames=node_frames)
-
-    for new_hg_etpye in new_hg.canonical_etypes:
-        if '-rev' in new_hg_etpye[1]:
-            etype=(new_hg_etpye[2], new_hg_etpye[1].replace('-rev',''), new_hg_etpye[0])
-        else:
-            etype=(new_hg_etpye[0], new_hg_etpye[1], new_hg_etpye[2])
-        edge_frame = hg.edges[etype].data
-        for data_name, value in edge_frame.items():
-            new_hg.edges[new_hg_etpye].data[data_name] = value
+    if copy_ndata:
+        node_frames = extract_node_subframes(hg, None)
+        set_new_frames(new_hg, node_frames=node_frames)
+    if copy_edata:
+        for etype in canonical_etypes:
+            edge_frame = hg.edges[etype].data
+            for data_name, value in edge_frame.items():
+                new_hg.edges[etype].data[data_name] = value
     return new_hg
 
 def getType(col):
@@ -308,8 +288,8 @@ def preprocess_raw(raw_path, preprocessed_path, nrows=None, overwrite=False):
     
     make_subset(raw_path, preprocessed_path, nrows=nrows, overwrite=overwrite)
     condition=os.path.exists(preprocessed_path+'/LFM-1b_users.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_artists.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_albums.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_tracks.txt') == False or os.path.exists(preprocessed_path+'/LFM-1b_LEs.txt') == False
-    if condition == True or overwrite==True and nrows==None:
-        print('----------------------------                     Preprocessing Raw Files                     ----------------------------')
+    if condition == True or (overwrite==True and nrows==None):
+        print('----------------------------                     Preprocessing Raw Files (FULL not subset)                 ----------------------------')
         unique_le_ids = load_txt_df(raw_path+'/LFM-1b_LEs.txt', type='le', load_raw=True, return_unique_ids=True, id_list=['artist_id', 'album_id', 'track_id','user_id'])
         df, bad_artist_name_ids = load_txt_df(raw_path+'/LFM-1b_artists.txt', type='artist', load_raw=True, return_with_bad_names=True)
         artist_artist_ids=df['artist_id'].unique().tolist()

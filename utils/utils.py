@@ -119,8 +119,9 @@ def get_predict_edge_index(graph: dgl.DGLGraph, sampled_edge_type: str or tuple,
     torch.manual_seed(seed=seed)
 
     selected_edges_num = int(graph.number_of_edges(sampled_edge_type) * sample_edge_rate)
-    permute_idx = torch.randperm(graph.number_of_edges(sampled_edge_type))
 
+    # random selection of train validation and test
+    permute_idx = torch.randperm(graph.number_of_edges(sampled_edge_type))
     train_edge_idx = permute_idx[: 3 * selected_edges_num]
     valid_edge_idx = permute_idx[3 * selected_edges_num: 4 * selected_edges_num]
     test_edge_idx = permute_idx[4 * selected_edges_num: 5 * selected_edges_num]
@@ -147,7 +148,6 @@ def get_edge_data_loader(node_neighbors_min_num: int, n_layers: int,
     for layer in range(n_layers):
         sample_nodes_num.append({etype: node_neighbors_min_num + layer for etype in graph.canonical_etypes})
 
-
     # # neighbor sampler
     # sampler = dgl.dataloading.MultiLayerNeighborSampler(sample_nodes_num)
 
@@ -166,9 +166,10 @@ def get_edge_data_loader(node_neighbors_min_num: int, n_layers: int,
     # pos_sampler
     pos_sampler = dgl.dataloading.MultiLayerNeighborSampler(sample_nodes_num)
 
-    # train_loader
+    # neg sampler
     train_neg_sampler = dgl.dataloading.negative_sampler.Uniform(negative_sample_edge_num)
-    
+
+    # train_loader
     train_sampler = dgl.dataloading.as_edge_prediction_sampler(pos_sampler, exclude='reverse_types',reverse_etypes=reverse_etypes, negative_sampler=train_neg_sampler)
     train_loader = dgl.dataloading.DataLoader(graph, {sampled_edge_type: train_edge_idx}, train_sampler, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
 

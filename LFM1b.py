@@ -7,11 +7,14 @@ from tqdm import tqdm
 from data_utils import CategoricalEncoder, IdentityEncoder, SequenceEncoder, add_reverse_edges, load_txt_df, mapIds, preprocess_listen_events_df, preprocess_raw, get_artist_genre_df
 
 class LFM1b(DGLDataset):
-    def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False, nrows=None, overwrite=False):
+    def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False, nrows=None, overwrite_processed=False, overwrite_preprocessed=False, overwrite_raw=False):
         self.root_dir = 'data/'+name
         self.preprocessed_dir = 'data/'+name+'/preprocessed'
         self.nrows=nrows
-        self.overwrite=overwrite
+        self.overwrite_processed=overwrite_processed
+        self.overwrite_preprocessed=overwrite_preprocessed
+        self.overwrite_raw=overwrite_raw
+
         self.lfm1b_ugp_url='http://www.cp.jku.at/datasets/LFM-1b/LFM-1b_UGP.zip'
         self.raw_ugp_dir='data/'+name+f'/{name}_UGP'
         super().__init__(
@@ -27,9 +30,9 @@ class LFM1b(DGLDataset):
     def download(self):
         """Download and extract Zip file from LFM1b"""
         if self.url is not None:
-            extract_archive(download(self.url, path = self.root_dir, overwrite = False), target_dir = self.root_dir+'/'+self.name, overwrite = self.overwrite)
+            extract_archive(download(self.url, path = self.root_dir, overwrite = False), target_dir = self.root_dir+'/'+self.name, overwrite = self.overwrite_raw)
             # LMF-1b_UGP.zip download goes here if needed
-            extract_archive(download(self.lfm1b_ugp_url, path = self.root_dir, overwrite = False), target_dir = self.root_dir, overwrite = self.overwrite)
+            extract_archive(download(self.lfm1b_ugp_url, path = self.root_dir, overwrite = False), target_dir = self.root_dir, overwrite = self.overwrite_raw)
             # extract_archive(download(lfm1b_ugp_zip_url, path=self.root_dir, overwrite=False), self.root_dir, overwrite=False)
             
             if not os.path.exists(self.preprocessed_dir):
@@ -55,9 +58,9 @@ class LFM1b(DGLDataset):
 
     # processes raw files into the preprocessed directory
     def process(self):
-        processed_condition = os.path.exists(os.path.join(self.save_dir+'/'+'lastfm1b.bin')) == False 
-        if processed_condition == True:
-            preprocess_raw(self.raw_dir,self.preprocessed_dir, nrows=self.nrows, overwrite=self.overwrite)
+        processed_condition = os.path.exists(os.path.join(self.save_dir+'/'+'lastfm1b.bin')) == False
+        if processed_condition == True or self.overwrite_processed==True:
+            preprocess_raw(self.raw_dir,self.preprocessed_dir, nrows=self.nrows, overwrite=self.overwrite_preprocessed)
             graph_data = {}
             edge_data_features = {}
             node_data_features = {}
