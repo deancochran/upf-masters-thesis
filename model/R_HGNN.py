@@ -2,12 +2,295 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import dgl
+import dgl.function as fn
+from dgl.ops import edge_softmax
+import time
 from tqdm import tqdm
 
-from model.RelationGraphConv import RelationGraphConv
-from model.HeteroConv import HeteroGraphConv
-from model.RelationCrossing import RelationCrossing
-from model.RelationFusing import RelationFusing
+
+
+class HeteroGraphConv(nn.Module):
+    r"""A generic module for computing convolution on heterogeneous graphs.
+
+    The heterograph convolution applies sub-modules on their associating
+    relation graphs, which reads the features from source nodes and writes the
+    updated ones to destination nodes. If multiple relations have the same
+    destination node types, their results are aggregated by the specified method.
+
+    If the relation graph has no edge, the corresponding module will not be called.
+ 
+    Parameters
+    ----------
+    mods : dict[str, nn.Module]
+        Modules associated with every edge types.
+    """
+
+    def __init__(self, mods: dict):
+        super(HeteroGraphConv, self).__init__()
+        self.mods = nn.ModuleDict(mods)
+
+    def forward(self, 
+                graph: dgl.DGLHeteroGraph, 
+                input_src: dict,
+                input_dst: dict, 
+                relation_embedding: dict,
+                node_transformation_weight: nn.ParameterDict, 
+                relation_transformation_weight: nn.ParameterDict):
+        """
+        call the forward function with each module.
+
+        Parameters
+        ----------
+        graph: DGLHeteroGraph, The Heterogeneous Graph.
+        input_src: dict[tuple, Tensor], Input source node features {relation_type: features, }
+        input_dst: dict[tuple, Tensor], Input destination node features {relation_type: features, }
+        relation_embedding: dict[etype, Tensor], Input relation features {etype: feature}
+        node_transformation_weight: nn.ParameterDict, weights {ntype, (inp_dim, hidden_dim)}
+        relation_transformation_weight: nn.ParameterDict, weights {etype, (n_heads, 2 * hidden_dim)}
+
+        Returns
+        -------
+        outputs, dict[tuple, Tensor]  Output representations for every relation -> {(stype, etype, dtype): features}.
+        """
+
+        # find reverse relation dict
+        reverse_relation_dict = {}
+        for srctype, reltype, dsttype in list(input_src.keys()):
+            for stype, etype, dtype in input_src:
+                if stype == dsttype and dtype == srctype and etype != reltype:
+                    reverse_relation_dict[reltype] = etype
+                    break
+
+        # dictionary, {(srctype, etype, dsttype): representations}
+        outputs = dict()
+
+        for stype, etype, dtype in graph.canonical_etypes:
+            rel_graph = graph[stype, etype, dtype]
+            if rel_graph.number_of_edges() == 0:
+                continue
+            # for example, (author, writes, paper) relation, take author as src_nodes, take paper as dst_nodes
+            dst_representation = self.mods[etype](rel_graph,
+                                                  (input_src[(dtype, reverse_relation_dict[etype], stype)],
+                                                   input_dst[(stype, etype, dtype)]),
+                                                  node_transformation_weight[dtype],
+                                                  node_transformation_weight[stype],
+                                                  relation_embedding[etype],
+                                                  relation_transformation_weight[etype])
+
+            # dst_representation (dst_nodes, hid_dim)
+            outputs[(stype, etype, dtype)] = dst_representation
+            
+
+        return outputs
+
+
+class RelationGraphConv(nn.Module):
+
+    def __init__(self, in_feats: tuple, out_feats: int, num_heads: int, dropout: float = 0.0, negative_slope: float = 0.2):
+        """
+        Relation graph convolution layer
+        Parameters
+        ----------
+        in_feats : pair of ints, input feature size
+        out_feats : int, output feature size
+        num_heads : int, number of heads in Multi-Head Attention
+        dropout : float, optional, dropout rate, defaults: 0
+        negative_slope : float, optional, negative slope rate, defaults: 0.2
+        """
+        super(RelationGraphConv, self).__init__()
+        self._in_src_feats, self._in_dst_feats = in_feats[0], in_feats[1]
+        self._out_feats = out_feats
+        self._num_heads = num_heads
+
+        self.dropout = nn.Dropout(dropout)
+        self.leaky_relu = nn.LeakyReLU(negative_slope)
+        self.relu = nn.ReLU()
+
+    def forward(self, graph: dgl.DGLHeteroGraph, feat: tuple, dst_node_transformation_weight: nn.Parameter,
+                src_node_transformation_weight: nn.Parameter, relation_embedding: torch.Tensor,
+                relation_transformation_weight: nn.Parameter):
+        r"""
+
+        Parameters
+        ----------
+        graph : specific relational DGLHeteroGraph
+        feat : pair of torch.Tensor
+            The pair contains two tensors of shape (N_{in}, D_{in_{src}})` and (N_{out}, D_{in_{dst}}).
+        dst_node_transformation_weight: Parameter (input_dst_dim, n_heads * hidden_dim)
+        src_node_transformation_weight: Parameter (input_src_dim, n_heads * hidden_dim)
+        relation_embedding: torch.Tensor, (relation_input_dim)
+        relation_transformation_weight: Parameter (relation_input_dim, n_heads * 2 * hidden_dim)
+
+        Returns
+        -------
+        torch.Tensor, shape (N, H, D_out)` where H is the number of heads, and D_out is size of output feature.
+        """
+        print('RelationGraphConv called')
+        print('relation_embedding',relation_embedding.shape)
+
+        graph = graph.local_var()
+        # Tensor, (N_src, input_src_dim)
+        feat_src = self.dropout(feat[0])
+        # Tensor, (N_dst, input_dst_dim)
+        feat_dst = self.dropout(feat[1])
+        # Tensor, (N_src, n_heads, hidden_dim) -> (N_src, input_src_dim) * (input_src_dim, n_heads * hidden_dim)
+        feat_src = torch.matmul(feat_src, src_node_transformation_weight).view(-1, self._num_heads, self._out_feats)
+        # Tensor, (N_dst, n_heads, hidden_dim) -> (N_dst, input_dst_dim) * (input_dst_dim, n_heads * hidden_dim)
+        feat_dst = torch.matmul(feat_dst, dst_node_transformation_weight).view(-1, self._num_heads, self._out_feats)
+
+
+        relation_attention_weight = torch.matmul(relation_embedding.unsqueeze(dim=0), relation_transformation_weight).view(self._num_heads, 2 * self._out_feats)
+        # ^^ This needs to be weighted by the normalized playcounts
+
+
+        # first decompose the weight vector into [a_l || a_r], then
+        # a^T [Wh_i || Wh_j] = a_l Wh_i + a_r Wh_j, This implementation is much efficient
+        # Tensor, (N_dst, n_heads, 1),   (N_dst, n_heads, hidden_dim) * (n_heads, hidden_dim)
+        e_dst = (feat_dst * relation_attention_weight[:, :self._out_feats]).sum(dim=-1, keepdim=True)
+        print('e_dst',e_dst.shape)
+        # Tensor, (N_src, n_heads, 1),   (N_src, n_heads, hidden_dim) * (n_heads, hidden_dim)
+        e_src = (feat_src * relation_attention_weight[:, self._out_feats:]).sum(dim=-1, keepdim=True)
+        print('e_src',e_src.shape)
+        # (N_src, n_heads, hidden_dim), (N_src, n_heads, 1)
+        graph.srcdata.update({'ft': feat_src, 'e_src': e_src})
+        # (N_dst, n_heads, 1)
+        graph.dstdata.update({'e_dst': e_dst})
+        # compute edge attention, e_src and e_dst are a_src * Wh_src and a_dst * Wh_dst respectively.
+        graph.apply_edges(fn.u_add_v('e_src', 'e_dst', 'e'))
+        # shape (edges_num, heads, 1)
+        e = self.leaky_relu(graph.edata.pop('e'))
+
+        print("e",e.shape)
+        print(e)
+
+        raise Exception('break')
+
+        # compute softmax
+        graph.edata['a'] = edge_softmax(graph, e)
+
+        graph.update_all(fn.u_mul_e('ft', 'a', 'msg'), fn.sum('msg', 'feat'))
+        # (N_dst, n_heads * hidden_dim), reshape (N_dst, n_heads, hidden_dim)
+        dst_features = graph.dstdata.pop('feat').reshape(-1, self._num_heads * self._out_feats)
+
+        dst_features = self.relu(dst_features)
+
+        return dst_features
+
+class RelationFusing(nn.Module):
+
+    def __init__(self, node_hidden_dim: int, relation_hidden_dim: int, num_heads: int, dropout: float = 0.0,
+                 negative_slope: float = 0.2):
+        """
+
+        :param node_hidden_dim: int, node hidden feature size
+        :param relation_hidden_dim: int,relation hidden feature size
+        :param num_heads: int, number of heads in Multi-Head Attention
+        :param dropout: float, dropout rate, defaults: 0.0
+        :param negative_slope: float, negative slope, defaults: 0.2
+        """
+        super(RelationFusing, self).__init__()
+        self.node_hidden_dim = node_hidden_dim
+        self.relation_hidden_dim = relation_hidden_dim
+        self.num_heads = num_heads
+
+        self.dropout = nn.Dropout(dropout)
+        self.leaky_relu = nn.LeakyReLU(negative_slope)
+
+    def forward(self, dst_node_features: list, dst_relation_embeddings: list,
+                dst_node_feature_transformation_weight: list,
+                dst_relation_embedding_transformation_weight: list):
+        """
+        :param dst_node_features: list, [each shape is (num_dst_nodes, n_heads * node_hidden_dim)]
+        :param dst_relation_embeddings: list, [each shape is (n_heads * relation_hidden_dim)]
+        :param dst_node_feature_transformation_weight: list, [each shape is (n_heads, node_hidden_dim, node_hidden_dim)]
+        :param dst_relation_embedding_transformation_weight:  list, [each shape is (n_heads, relation_hidden_dim, relation_hidden_dim)]
+        :return: dst_node_relation_fusion_feature: Tensor of the target node representation after relation-aware representations fusion
+        """
+        if len(dst_node_features) == 1:
+            # (num_dst_nodes, n_heads * hidden_dim)
+            dst_node_relation_fusion_feature = dst_node_features[0]
+        else:
+            # (num_dst_relations, nodes, n_heads, node_hidden_dim)
+            dst_node_features = torch.stack(dst_node_features, dim=0).reshape(len(dst_node_features), -1,
+                                                                              self.num_heads, self.node_hidden_dim)
+            # (num_dst_relations, n_heads, relation_hidden_dim)
+            dst_relation_embeddings = torch.stack(dst_relation_embeddings, dim=0).reshape(len(dst_node_features),
+                                                                                          self.num_heads,
+                                                                                          self.relation_hidden_dim)
+            # (num_dst_relations, n_heads, node_hidden_dim, node_hidden_dim)
+            dst_node_feature_transformation_weight = torch.stack(dst_node_feature_transformation_weight, dim=0).reshape(
+                len(dst_node_features), self.num_heads,
+                self.node_hidden_dim, self.node_hidden_dim)
+            # (num_dst_relations, n_heads, relation_hidden_dim, relation_hidden_dim)
+            dst_relation_embedding_transformation_weight = torch.stack(dst_relation_embedding_transformation_weight,
+                                                                       dim=0).reshape(len(dst_node_features),
+                                                                                      self.num_heads,
+                                                                                      self.relation_hidden_dim,
+                                                                                      self.node_hidden_dim)
+            # shape (num_dst_relations, nodes, n_heads, hidden_dim)
+            dst_node_features = torch.einsum('abcd,acde->abce', dst_node_features,
+                                             dst_node_feature_transformation_weight)
+
+            # shape (num_dst_relations, n_heads, hidden_dim)
+            dst_relation_embeddings = torch.einsum('abc,abcd->abd', dst_relation_embeddings,
+                                                   dst_relation_embedding_transformation_weight)
+
+            # shape (num_dst_relations, nodes, n_heads, 1)
+            attention_scores = (dst_node_features * dst_relation_embeddings.unsqueeze(dim=1)).sum(dim=-1, keepdim=True)
+            attention_scores = F.softmax(self.leaky_relu(attention_scores), dim=0)
+            # (nodes, n_heads, hidden_dim)
+            dst_node_relation_fusion_feature = (dst_node_features * attention_scores).sum(dim=0)
+            dst_node_relation_fusion_feature = self.dropout(dst_node_relation_fusion_feature)
+            # (nodes, n_heads * hidden_dim)
+            dst_node_relation_fusion_feature = dst_node_relation_fusion_feature.reshape(-1,
+                                                                                        self.num_heads * self.node_hidden_dim)
+
+        return dst_node_relation_fusion_feature
+
+
+class RelationCrossing(nn.Module):
+
+    def __init__(self, in_feats: int, out_feats: int, num_heads: int, dropout: float = 0.0, negative_slope: float = 0.2):
+        """
+        Relation crossing layer
+        Parameters
+        ----------
+        in_feats : pair of ints, input feature size
+        out_feats : int, output feature size
+        num_heads : int, number of heads in Multi-Head Attention
+        dropout : float, optional, dropout rate, defaults: 0.0
+        negative_slope : float, optional, negative slope rate, defaults: 0.2
+        """
+        super(RelationCrossing, self).__init__()
+        self._in_feats = in_feats
+        self._out_feats = out_feats
+        self._num_heads = num_heads
+
+        self.dropout = nn.Dropout(dropout)
+        self.leaky_relu = nn.LeakyReLU(negative_slope)
+
+    def forward(self, dsttype_node_features: torch.Tensor, relations_crossing_attention_weight: nn.Parameter):
+        """
+        :param dsttype_node_features: a tensor of (dsttype_node_relations_num, num_dst_nodes, n_heads * hidden_dim)
+        :param relations_crossing_attention_weight: Parameter the shape is (n_heads, hidden_dim)
+        :return: output_features: a Tensor
+        """
+        if len(dsttype_node_features) == 1:
+            # (num_dst_nodes, n_heads * hidden_dim)
+            dsttype_node_features = dsttype_node_features.squeeze(dim=0)
+        else:
+            # (dsttype_node_relations_num, num_dst_nodes, n_heads, hidden_dim)
+            dsttype_node_features = dsttype_node_features.reshape(dsttype_node_features.shape[0], -1, self._num_heads, self._out_feats)
+            # shape -> (dsttype_node_relations_num, dst_nodes_num, n_heads, 1),  (dsttype_node_relations_num, dst_nodes_num, n_heads, hidden_dim) * (n_heads, hidden_dim)
+            dsttype_node_relation_attention = (dsttype_node_features * relations_crossing_attention_weight).sum(dim=-1, keepdim=True)
+            dsttype_node_relation_attention = F.softmax(self.leaky_relu(dsttype_node_relation_attention), dim=0)
+            # shape -> (dst_nodes_num, n_heads, hidden_dim),  (dsttype_node_relations_num, dst_nodes_num, n_heads, hidden_dim) * (dsttype_node_relations_num, dst_nodes_num, n_heads, 1)
+            dsttype_node_features = (dsttype_node_features * dsttype_node_relation_attention).sum(dim=0)
+            dsttype_node_features = self.dropout(dsttype_node_features)
+            # shape -> (dst_nodes_num, n_heads * hidden_dim)
+            dsttype_node_features = dsttype_node_features.reshape(-1, self._num_heads * self._out_feats)
+
+        return dsttype_node_features
 
 
 class R_HGNN_Layer(nn.Module):
@@ -123,6 +406,7 @@ class R_HGNN_Layer(nn.Module):
                                                         :graph.number_of_dst_nodes(dsttype)]
         else:
             input_dst = relation_target_node_features
+   
 
         # output_features, dict {(srctype, etypye, dsttype): target_node_features}
         output_features = self.hetero_conv(graph, input_src, input_dst, relation_embedding,
@@ -135,6 +419,7 @@ class R_HGNN_Layer(nn.Module):
                 output_features[(srctype, etype, dsttype)] = output_features[(srctype, etype, dsttype)] * alpha + \
                                                              self.res_fc[dsttype](
                                                                  input_dst[(srctype, etype, dsttype)]) * (1 - alpha)
+                                                                
 
         output_features_dict = {}
         # different relations crossing layer
@@ -243,7 +528,7 @@ class R_HGNN(nn.Module):
         for etype in self.relation_transformation_weight:
             nn.init.xavier_normal_(self.relation_transformation_weight[etype], gain=gain)
 
-    def forward(self, blocks: list, relation_target_node_features: dict, relation_embedding: dict = None):
+    def forward(self, blocks: list, relation_target_node_features: dict, relation_embedding: dict = None, playcount_embedding_dict: dict = None):
         """
 
         :param blocks: list of sampled dgl.DGLHeteroGraph
@@ -255,6 +540,7 @@ class R_HGNN(nn.Module):
         for stype, reltype, dtype in relation_target_node_features:
             relation_target_node_features[(stype, reltype, dtype)] = self.projection_layer[dtype](relation_target_node_features[(stype, reltype, dtype)])
 
+
         # each relation is associated with a specific type, if no semantic information is given,
         # then the one-hot representation of each relation is assign with trainable hidden representation
         if relation_embedding is None:
@@ -262,15 +548,11 @@ class R_HGNN(nn.Module):
             for etype in self.relation_embedding:
                 relation_embedding[etype] = self.relation_embedding[etype].flatten()
 
+
         
 
         # graph convolution
         for block, layer in zip(blocks, self.layers):
-            # print('relation_target_node_features')
-            # for key in relation_target_node_features.keys():
-            #     print(f'{key} relation_target_node_features', relation_target_node_features[key].shape)
-            # for key in relation_embedding.keys():
-            #     print(f'{key} relation_embedding', relation_embedding[key].shape)
             relation_target_node_features, relation_embedding = layer(block, relation_target_node_features,
                                                                       relation_embedding)
 

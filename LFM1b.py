@@ -1,10 +1,13 @@
+from logging import raiseExceptions
 import os
 import torch as th
 from dgl import heterograph
 from dgl.data import DGLDataset, download, extract_archive
 from dgl.data.utils import save_graphs, load_graphs
-from tqdm import tqdm
-from data_utils import CategoricalEncoder, IdentityEncoder, SequenceEncoder, add_reverse_edges, load_txt_df, mapIds, preprocess_listen_events_df, preprocess_raw, get_artist_genre_df
+from data_utils import get_artist_genre_df, get_full_le_plays, get_le_playcount, get_preprocessed_ids, remap_ids
+from preprocess import preprocess_raw
+from encoders import CategoricalEncoder, IdentityEncoder
+
 
 class LFM1b(DGLDataset):
     def __init__(self, name='LFM-1b', hash_key=(), force_reload=False, verbose=False, nrows=None, overwrite_processed=False, overwrite_preprocessed=False, overwrite_raw=False):
@@ -54,12 +57,11 @@ class LFM1b(DGLDataset):
             glist=[self.graph]
             glabels={"glabel": th.tensor([0])}
             save_graphs(self.save_dir+'/lastfm1b.bin',glist,glabels)
-            print(self.graph)
 
     # processes raw files into the preprocessed directory
     def process(self):
         processed_condition = os.path.exists(os.path.join(self.save_dir+'/'+'lastfm1b.bin')) == False
-        if processed_condition == True or self.overwrite_processed==True:
+        if processed_condition == True or self.overwrite_processed==True or self.overwrite_preprocessed==True:
             preprocess_raw(self.raw_dir,self.preprocessed_dir, nrows=self.nrows, overwrite=self.overwrite_preprocessed)
             graph_data = {}
             edge_data_features = {}
@@ -67,124 +69,189 @@ class LFM1b(DGLDataset):
             # device = th.device("cuda" if th.cuda.is_available() else "cpu") # this dataset only can be processed on cpu
             device = th.device("cpu")
             mappings={} # a id remapping for all the ids in the data base
-            for filename in ['genres_allmusic.txt', 'LFM-1b_artists.txt', 'LFM-1b_albums.txt', 'LFM-1b_tracks.txt', 'LFM-1b_users.txt', 'LFM-1b_LEs.txt']:
+            list_of_filenames=['LFM-1b_artists.txt', 'genres_allmusic.txt', 'LFM-1b_albums.txt', 'LFM-1b_tracks.txt', 'LFM-1b_users.txt', 'LFM-1b_LEs.txt']
+            for filename in list_of_filenames:
                 file_path=self.preprocessed_dir+'/'+filename
-                print('\t','-------------------',file_path.split('_')[-1],'-------------------')
-                if filename=='genres_allmusic.txt':
-                    df = load_txt_df(file_path, type='genre')
-                    # -------------------------GENRE NODE FEATURES-------------------------
-                    # encoders={'genre_name': SequenceEncoder(device=device),}
-                    # node_data_features['genre'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = CategoricalEncoder(device=device)
-                    node_data_features['genre'] = {'feat': id_encoder(df['genre_id'].values)}
+                print('\t','------------------- Loading Info from',file_path.split('_')[-1],'-------------------')
 
-                elif filename=='LFM-1b_artists.txt':
+                id_encoder = IdentityEncoder(dtype=th.float,device=device) # used to encode floats f(x)==2, where x = 2
+                cat_encoder = CategoricalEncoder(device=device) # used to encode categories f(x)==[0,0,1,0], where x = 2, of possible types 0,1,2,3
+                # seq_encoder = SequenceEncoder(device=device) # used to encode strs f(x)==[0.213,0.254,...,134,.893], where x = 'dean', and shape is (1x254)
+                
+                if filename=='LFM-1b_artists.txt':
                     # -------------------------ARTIST ID RE-MAPPING-------------------------
-                    df = load_txt_df(file_path, type='artist')
+                    df = get_preprocessed_ids(file_path, type='artist', id_list=['artist_id','artist_name'])
                     mappings['artist_mapping'] = {int(id): i for i, id in enumerate(df['artist_id'])}
-                    df = mapIds(df, cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                    df=remap_ids(df, ordered_cols=['artist_id'], mappings=[mappings['artist_mapping']])
+                    mappings['artist_name_mapping'] = {artist_name: int(artist_id)  for artist_id, artist_name in zip(df['artist_id'],df['artist_name'])}
                     # -------------------------ARTIST NODE FEATURES-------------------------
-                    # encoders={'artist_name': SequenceEncoder(device=device),}
-                    # node_data_features['artist'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = CategoricalEncoder(device=device)
-                    node_data_features['artist'] = {'feat': id_encoder(df['artist_id'].values)}
+                    node_data_features['artist'] = {'feat': cat_encoder(df['artist_id'])}
+
+                    del df
+                    
+
+                elif filename=='genres_allmusic.txt':
+                    df = get_preprocessed_ids(file_path,type='genre', return_unique_ids=True ,id_list=['genre_id'])
+                    # -------------------------GENRE NODE FEATURES-------------------------
+                    node_data_features['genre'] = {'feat': cat_encoder(df['genre_id'])}
+                    del df
+
+                    artist_genres_path=self.raw_ugp_dir+'/LFM-1b_artist_genres_allmusic.txt'
+                    df = get_artist_genre_df(artist_genres_path, mappings['artist_name_mapping'])
                     # -------------------------ARTIST->GENRE EDGES-------------------------
-                    mappings['artist_name_mapping'] = {row['artist_name']: row['artist_id']  for i, row in df.iterrows()}
-                    df = get_artist_genre_df(self.raw_ugp_dir+'/LFM-1b_artist_genres_allmusic.txt', df['artist_name'].tolist(), mappings['artist_name_mapping'])
                     graph_data[('artist', 'in_genre', 'genre')]=(th.tensor(df['artist_id'].values), th.tensor(df['genre_id'].values))
+                    edge_data_features['in_genre']={'norm_playcount': id_encoder([1 for id in df['genre_id']])}
+                    # -------------------------GENRE->ARTIST EDGES-------------------------
+                    graph_data[('genre', 'is_genre_of', 'artist')]=(th.tensor(df['genre_id'].values), th.tensor(df['artist_id'].values))
+                    edge_data_features['is_genre_of']={'norm_playcount': id_encoder([1 for id in df['genre_id']])}
+
+                    del df
+                    del mappings['artist_name_mapping']
+
+                
                 
                 elif filename=='LFM-1b_albums.txt':
-                    df = load_txt_df(file_path, type='album')
                     # -------------------------ALBUM ID RE-MAPPING-------------------------
+                    df = get_preprocessed_ids(file_path, type='album', id_list=['album_id','artist_id'])
                     mappings['album_mapping'] = {int(id): i for i, id in enumerate(df['album_id'])}
-                    df = mapIds(df, cols=['artist_id', 'album_id'], mappings=[mappings['artist_mapping'], mappings['album_mapping']])
+                    df=remap_ids(df, ordered_cols=['artist_id','album_id'], mappings=[mappings['artist_mapping'], mappings['album_mapping']])
                     # -------------------------ALBUM NODE FEATURES-------------------------
-                    # encoders={'album_name': SequenceEncoder(device=device),}
-                    # node_data_features['album'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = CategoricalEncoder(device=device)
-                    node_data_features['album'] = {'feat': id_encoder(df['album_id'].values)}
+                    node_data_features['album'] = {'feat': cat_encoder(df['album_id'])}
                     # -------------------------ALBUM->ARTIST EDGES-------------------------
-                    graph_data[('album', 'produced_by', 'artist')]=(th.tensor(df['album_id'].values), th.tensor(df['artist_id'].values))
+                    graph_data[('album', 'produced_by', 'artist')]=(th.tensor(df['album_id']), th.tensor(df['artist_id']))
+                    edge_data_features['produced_by']={'norm_playcount': id_encoder([1 for id in df['album_id']])}
+                    # -------------------------ARTIST->ALBUM EDGES-------------------------
+                    graph_data[('artist', 'produced', 'album')]=(th.tensor(df['artist_id']), th.tensor(df['album_id']))
+                    edge_data_features['produced']={'norm_playcount': id_encoder([1 for id in df['album_id']])}
+
+                    del df
+
 
                 elif filename=='LFM-1b_tracks.txt':
-                    df = load_txt_df(file_path, type='track')
                     # -------------------------TRACK ID RE-MAPPING-------------------------
+                    df = get_preprocessed_ids(file_path, type='track', id_list=['track_id','artist_id'])
                     mappings['track_mapping'] = {int(id): i for i, id in enumerate(df['track_id'])}
-                    df = mapIds(df, cols=['artist_id','track_id'], mappings=[mappings['artist_mapping'],mappings['track_mapping']])
+                    df=remap_ids(df, ordered_cols=['artist_id','track_id'], mappings=[mappings['artist_mapping'], mappings['track_mapping']])
                     # -------------------------TRACK NODE FEATURES-------------------------
-                    # encoders={'track_name': SequenceEncoder(device=device),}
-                    # node_data_features['track'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = CategoricalEncoder(device=device)
-                    node_data_features['track'] = {'feat': id_encoder(df['track_id'].values)}
+                    node_data_features['track'] = {'feat': cat_encoder(df['track_id'])}
                     # -------------------------TRACK->ARTIST EDGES-------------------------
-                    graph_data[('track', 'preformed_by', 'artist')]=(th.tensor(df['track_id'].values), th.tensor(df['artist_id'].values))
+                    graph_data[('track', 'preformed_by', 'artist')]=(th.tensor(df['track_id']), th.tensor(df['artist_id']))
+                    edge_data_features['preformed_by']={'norm_playcount': id_encoder([1 for id in df['track_id']])}
+                    # -------------------------ARTIST->TRACK EDGES-------------------------
+                    graph_data[('artist', 'preformed', 'track')]=(th.tensor(df['artist_id']), th.tensor(df['track_id']))
+                    edge_data_features['preformed']={'norm_playcount': id_encoder([1 for id in df['track_id']])}
+
+                    del df
+
 
                 elif filename=='LFM-1b_users.txt':
-                    df = load_txt_df(file_path, type='user')
                     # -------------------------USER ID RE-MAPPING-------------------------
+                    df = get_preprocessed_ids(file_path, type='user', id_list=['user_id'])
                     mappings['user_mapping']= {int(id): i for i, id in enumerate(df['user_id'])}
-                    df = mapIds(df, cols=['user_id'], mappings=[mappings['user_mapping']])
+                    df=remap_ids(df, ordered_cols=['user_id'], mappings=[mappings['user_mapping']])
                     # -------------------------USER NODE FEATURES-------------------------
-                    # encoders={
-                    #     'country': CategoricalEncoder(device=device),
-                    #     'age': IdentityEncoder(dtype=th.long,device=device),
-                    #     'gender': CategoricalEncoder(device=device),
-                    #     'playcount': IdentityEncoder(dtype=th.float,device=device),
-                    #     'registered_unixtime' : IdentityEncoder(dtype=th.long,device=device),
-                    # }
-                    # node_data_features['user'] = {col:encoder(df[col].values) for col, encoder in encoders.items()}
-                    id_encoder = CategoricalEncoder(device=device)
-                    node_data_features['user'] = {'feat': id_encoder(df['user_id'].values)}
+                    node_data_features['user'] = {'feat': cat_encoder(df['user_id'])}
+                    del df
 
                 elif filename=='LFM-1b_LEs.txt':
-                    df = load_txt_df(file_path, type='le')
-                    encoders={
-                        'playcount': IdentityEncoder(dtype=th.float,device=device),
-                        # 'last_played' : IdentityEncoder(dtype=th.float,device=device),
-                    }
-                    # -------------------------LE IDs RE-MAPPING-------------------------
-                    df = mapIds(df, cols=['user_id', 'artist_id', 'album_id', 'track_id'], mappings=[mappings['user_mapping'], mappings['artist_mapping'], mappings['album_mapping'], mappings['track_mapping']])
-                    # -------------------------USER->ALBUMS-------------------------
-                    le_df = preprocess_listen_events_df(df, type='album')
-                    graph_data[('user', 'listened_to_album', 'album')]=(th.tensor(le_df['user_id'].values), th.tensor(le_df['album_id'].values))
-                    edge_data_features[('user', 'listened_to_album', 'album')] = {col:encoder(le_df[col].values) for col, encoder in encoders.items()}
-
                     # -------------------------USER->ARTISTS-------------------------
-                    le_df = preprocess_listen_events_df(df, type='artist')
-                    graph_data[('user', 'listened_to_artist', 'artist')]=(th.tensor(le_df['user_id'].values), th.tensor(le_df['artist_id'].values))
-                    edge_data_features[('user', 'listened_to_artist', 'artist')] = {col:encoder(le_df[col].values) for col, encoder in encoders.items()}
+                    user_id_list, groupby_id_list, playcounts=get_le_playcount(
+                        file_path,type_id='artist_id',
+                        user_mapping=mappings['user_mapping'], 
+                        groupby_mapping=mappings['artist_mapping'], 
+                        relative_playcount=True
+                        )
+                    graph_data[('user', 'listened_to_artist', 'artist')]=(
+                        th.tensor(user_id_list), 
+                        th.tensor(groupby_id_list)
+                        )
+                    edge_data_features['listened_to_artist']={'norm_playcount': id_encoder(playcounts)}
+
+                    graph_data[('artist', 'artist_listened_by', 'user')]=(
+                        th.tensor(groupby_id_list), 
+                        th.tensor(user_id_list)
+                        )
+                    edge_data_features['artist_listened_by']={'norm_playcount': id_encoder(playcounts)}
+                    del mappings['artist_mapping']
+                    del user_id_list
+                    del groupby_id_list
+                    del playcounts
+
+                    # -------------------------USER->ALBUMS-------------------------                    
+                    user_id_list, groupby_id_list, playcounts=get_le_playcount(
+                        file_path,type_id='album_id',
+                        user_mapping=mappings['user_mapping'], 
+                        groupby_mapping=mappings['album_mapping'], 
+                        relative_playcount=True
+                        )
+                    graph_data[('user', 'listened_to_album', 'album')]=(
+                        th.tensor(user_id_list), 
+                        th.tensor(groupby_id_list)
+                        )
+                    edge_data_features['listened_to_album']={'norm_playcount': id_encoder(playcounts)}
+
+                    graph_data[('album', 'album_listened_by', 'user')]=(
+                        th.tensor(groupby_id_list), 
+                        th.tensor(user_id_list)
+                        )
+                    edge_data_features['album_listened_by']={'norm_playcount': id_encoder(playcounts)}
+                    del mappings['album_mapping']
+                    del user_id_list
+                    del groupby_id_list
+                    del playcounts
                     
                     # -------------------------USER->TRACKS-------------------------
-                    le_df = preprocess_listen_events_df(df, type='track')
-                    graph_data[('user', 'listened_to_track', 'track')]=(th.tensor(le_df['user_id'].values), th.tensor(le_df['track_id'].values))
-                    edge_data_features[('user', 'listened_to_track', 'track')] = {col:encoder(le_df[col].values) for col, encoder in encoders.items()}
+                    user_id_list, groupby_id_list, playcounts=get_le_playcount(
+                        file_path,type_id='track_id',
+                        user_mapping=mappings['user_mapping'], 
+                        groupby_mapping=mappings['track_mapping'], 
+                        relative_playcount=True
+                        )
+                    graph_data[('user', 'listened_to_track', 'track')]=(
+                        th.tensor(user_id_list), 
+                        th.tensor(groupby_id_list)
+                        )
+                    edge_data_features['listened_to_track']={'norm_playcount': id_encoder(playcounts)}
 
-                    del le_df
+                    graph_data[('track', 'track_listened_by', 'user')]=(
+                        th.tensor(groupby_id_list), 
+                        th.tensor(user_id_list)
+                        )
+                    edge_data_features['track_listened_by']={'norm_playcount': id_encoder(playcounts)}
+                    del mappings['track_mapping']
+                    del user_id_list
+                    del groupby_id_list
+                    del playcounts
+
                 else:
                     raise Exception('filename in processed directory is bad.. Filename:',filename)
-            
                 
-                del df
+            del mappings
+
+            print('\t','-------------------  Creating Graph from data  -------------------')
 
             # create graph data
             self.graph = heterograph(graph_data)
+            # print(self.graph)
+            del graph_data
             
+            print('\t','-------------------  Setting Graph edge data  -------------------')
             # init graph edge data
             for edge in edge_data_features:
                 for feature in edge_data_features[edge].keys():
                     feature_data = edge_data_features[edge][feature]
+                    print(f'assigning feature of shape {feature_data.shape} to {edge}')
                     self.graph.edges[edge].data[feature] = feature_data
             del edge_data_features
 
+            print('\t','-------------------  Setting Graph node data  -------------------')
             # init graph node data
-            for node in node_data_features:
+            for node in node_data_features.keys():
                 for feature in node_data_features[node].keys():
                     feature_data = node_data_features[node][feature]
+                    print(f'assigning feature of shape {feature_data.shape} to {node}')
                     self.graph.nodes[node].data[feature] = feature_data
             del node_data_features
-
-            # add reverse edges to the graph object
-            self.graph = add_reverse_edges(self.graph)
 
     def __getitem__(self, idx):
         glist,_=self.load()
@@ -192,4 +259,4 @@ class LFM1b(DGLDataset):
 
     def __len__(self):
         return 1
- 
+  
