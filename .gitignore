@@ -112,7 +112,6 @@ ENV/
 .mypy_cache/
 
 # data
-data/*
 
 *.pkl
 *.txt
@@ -123,4 +122,9 @@ data/*
 *.png
 *.mat
 *.pt
+
+DGL_LFM1b/__pycache__/*
+DGL_LFM1b/data/*
+DGL_LFM1b/.env/*
+DGL_LFM1b/.gitignore
 

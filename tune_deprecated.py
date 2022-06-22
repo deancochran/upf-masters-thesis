@@ -14,7 +14,7 @@ class Dict2Class(object):
 
 args_range_dict={
     'seed':[0],
-    'nrows':[None],
+    'n_users':[None],
     'num_layers':[2,6],
     'sample_edge_rate':[0.01,.05],
     'batch_size':[512,1024],

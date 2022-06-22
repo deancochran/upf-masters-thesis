@@ -239,4 +239,9 @@ def evaluate_link_prediction(predict_scores: torch.Tensor, true_scores: torch.Te
     RMSE = sqrt(mean_squared_error(true_scores.cpu().numpy(), predict_scores.cpu().numpy()))
     MAE = mean_absolute_error(true_scores.cpu().numpy(), predict_scores.cpu().numpy())
 
+    # for pred_score, true_score in zip(predict_scores,true_scores):
+    #     print(pred_score, true_score)
+
+    # raise Exception('check predict and true')
+
     return RMSE, MAE
