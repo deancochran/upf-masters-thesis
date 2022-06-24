@@ -169,16 +169,10 @@ class RelationGraphConv(nn.Module):
             if args.playcount_weight==True:
                 # compute softmax
                 graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e'))*graph.edata['weight'].unsqueeze(1))
-
             else:
                 graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e')))
-
         else:
             graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e')))
-
-            
-
-        
 
         graph.update_all(fn.u_mul_e('ft', 'a', 'msg'), fn.sum('msg', 'feat'))
         # (N_dst, n_heads * hidden_dim), reshape (N_dst, n_heads, hidden_dim)
