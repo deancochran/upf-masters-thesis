@@ -7,6 +7,8 @@ import dgl.function as fn
 from dgl.ops import edge_softmax
 import time
 from tqdm import tqdm
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class HeteroGraphConv(nn.Module):
@@ -35,7 +37,7 @@ class HeteroGraphConv(nn.Module):
                 input_dst: dict,
                 relation_embedding: dict,
                 node_transformation_weight: nn.ParameterDict,
-                relation_transformation_weight: nn.ParameterDict):
+                relation_transformation_weight: nn.ParameterDict, args=None):
         """
         call the forward function with each module.
 
@@ -75,7 +77,8 @@ class HeteroGraphConv(nn.Module):
                                                   node_transformation_weight[dtype],
                                                   node_transformation_weight[stype],
                                                   relation_embedding[etype],
-                                                  relation_transformation_weight[etype])
+                                                  relation_transformation_weight[etype],
+                                                  args=args)
 
             # dst_representation (dst_nodes, hid_dim)
             outputs[(stype, etype, dtype)] = dst_representation
@@ -107,7 +110,8 @@ class RelationGraphConv(nn.Module):
 
     def forward(self, graph: dgl.DGLHeteroGraph, feat: tuple, dst_node_transformation_weight: nn.Parameter,
                 src_node_transformation_weight: nn.Parameter, relation_embedding: torch.Tensor,
-                relation_transformation_weight: nn.Parameter):
+                relation_transformation_weight: nn.Parameter,
+                args=None):
         r"""
 
         Parameters
@@ -157,10 +161,24 @@ class RelationGraphConv(nn.Module):
         graph.apply_edges(fn.u_add_v('e_src', 'e_dst', 'e'))
 
         # shape (edges_num, heads, 1)
-        e = self.leaky_relu(graph.edata.pop('e'))
+        # e = self.leaky_relu(graph.edata.pop('e'))
+        # graph.edata['a'] = edge_softmax(graph, e)
+        
+        
+        if args!=None and graph.etypes[0] in ['listened_to_track','listened_to_album','listened_to_artist']:
+            if args.playcount_weight==True:
+                # compute softmax
+                graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e'))*graph.edata['weight'].unsqueeze(1))
 
-        # compute softmax
-        graph.edata['a'] = edge_softmax(graph, e)
+            else:
+                graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e')))
+
+        else:
+            graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e')))
+
+            
+
+        
 
         graph.update_all(fn.u_mul_e('ft', 'a', 'msg'), fn.sum('msg', 'feat'))
         # (N_dst, n_heads * hidden_dim), reshape (N_dst, n_heads, hidden_dim)
@@ -396,7 +414,7 @@ class R_HGNN_Layer(nn.Module):
             nn.init.xavier_normal_(
                 self.relations_crossing_attention_weight[weight], gain=gain)
 
-    def forward(self, graph: dgl.DGLHeteroGraph, relation_target_node_features: dict, relation_embedding: dict):
+    def forward(self, graph: dgl.DGLHeteroGraph, relation_target_node_features: dict, relation_embedding: dict,args=None):
         """
 
         :param graph: dgl.DGLHeteroGraph
@@ -420,7 +438,7 @@ class R_HGNN_Layer(nn.Module):
 
         # output_features, dict {(srctype, etypye, dsttype): target_node_features}
         output_features = self.hetero_conv(graph, input_src, input_dst, relation_embedding,
-                                           self.node_transformation_weight, self.relation_transformation_weight)
+                                           self.node_transformation_weight, self.relation_transformation_weight,args=args)
 
         # residual connection for the target node
         if self.residual:
@@ -542,7 +560,7 @@ class R_HGNN(nn.Module):
             nn.init.xavier_normal_(
                 self.relation_transformation_weight[etype], gain=gain)
 
-    def forward(self, blocks: list, relation_target_node_features: dict, relation_embedding: dict = None):
+    def forward(self, blocks: list, relation_target_node_features: dict, relation_embedding: dict = None, args=None):
         """
 
         :param blocks: list of sampled dgl.DGLHeteroGraph
@@ -567,7 +585,7 @@ class R_HGNN(nn.Module):
         # graph convolution
         for block, layer in zip(blocks, self.layers):
             relation_target_node_features, relation_embedding = layer(block, relation_target_node_features,
-                                                                      relation_embedding)
+                                                                      relation_embedding, args=args)
             
 
         relation_fusion_embedding_dict = {}

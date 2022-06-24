@@ -79,39 +79,39 @@ def load_dataset(data_path: str, predict_category: str, data_split_idx_path: str
     return graph, labels, num_classes, train_idx, valid_idx, test_idx
 
 
-def get_node_data_loader(node_neighbors_min_num: int, n_layers: int,
-                         graph: dgl.DGLGraph, batch_size: int, sampled_node_type: str,
-                         train_idx: torch.Tensor, valid_idx: torch.Tensor, test_idx: torch.Tensor,
-                         shuffle: bool = True, drop_last: bool = False, num_workers: int = 4):
-    """
-    get graph node data loader, including train_loader, val_loader and test_loader
-    :return:
-    """
-    # list of neighbors to sample per edge type for each GNN layer
-    sample_nodes_num = []
-    for layer in range(n_layers):
-        sample_nodes_num.append({etype: node_neighbors_min_num + layer for etype in graph.canonical_etypes})
+# def get_node_data_loader(node_neighbors_min_num: int, n_layers: int,
+#                          graph: dgl.DGLGraph, batch_size: int, sampled_node_type: str,
+#                          train_idx: torch.Tensor, valid_idx: torch.Tensor, test_idx: torch.Tensor,
+#                          shuffle: bool = True, drop_last: bool = False, num_workers: int = 4):
+#     """
+#     get graph node data loader, including train_loader, val_loader and test_loader
+#     :return:
+#     """
+#     # list of neighbors to sample per edge type for each GNN layer
+#     sample_nodes_num = []
+#     for layer in range(n_layers):
+#         sample_nodes_num.append({etype: node_neighbors_min_num + layer for etype in graph.canonical_etypes})
 
-    # neighbor sampler
-    sampler = dgl.dataloading.MultiLayerNeighborSampler(sample_nodes_num)
+#     # neighbor sampler
+#     sampler = dgl.dataloading.MultiLayerNeighborSampler(sample_nodes_num)
 
-    train_loader = dgl.dataloading.NodeDataLoader(
-        graph, {sampled_node_type: train_idx}, sampler,
-        batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
+#     train_loader = dgl.dataloading.NodeDataLoader(
+#         graph, {sampled_node_type: train_idx}, sampler,
+#         batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
 
-    val_loader = dgl.dataloading.NodeDataLoader(
-        graph, {sampled_node_type: valid_idx}, sampler,
-        batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
+#     val_loader = dgl.dataloading.NodeDataLoader(
+#         graph, {sampled_node_type: valid_idx}, sampler,
+#         batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
 
-    test_loader = dgl.dataloading.NodeDataLoader(
-        graph, {sampled_node_type: test_idx}, sampler,
-        batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
+#     test_loader = dgl.dataloading.NodeDataLoader(
+#         graph, {sampled_node_type: test_idx}, sampler,
+#         batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
 
-    return train_loader, val_loader, test_loader
+#     return train_loader, val_loader, test_loader
 
 
 def get_predict_edge_index(graph: dgl.DGLGraph, sampled_edge_type: str or tuple,
-                           sample_edge_rate: float, seed: int = 0):
+                           sample_edge_rate: float, seed: int = 0, use_rand=False,split_by_users=False):
     """
     get predict edge index, return train_edge_idx, valid_edge_idx, test_edge_idx
     :return:
@@ -119,16 +119,35 @@ def get_predict_edge_index(graph: dgl.DGLGraph, sampled_edge_type: str or tuple,
     torch.manual_seed(seed=seed)
 
     selected_edges_num = int(graph.number_of_edges(sampled_edge_type) * sample_edge_rate)
+    if use_rand==False:
+        edge_range = torch.range(0, graph.number_of_edges(sampled_edge_type)-1, dtype=th.int64)
+        train_edge_idx = edge_range[: 3 * selected_edges_num]
+        valid_edge_idx = edge_range[3 * selected_edges_num: 4 * selected_edges_num]
+        test_edge_idx = edge_range[4 * selected_edges_num: 5 * selected_edges_num]
+    elif split_by_users==True:
+        selected_edges_num = int(graph.num_nodes('user') * .249)
+        permute_idx = torch.randperm(graph.num_nodes('user'))
+        user_train_edge_idx = permute_idx[: 3 * selected_edges_num]
+        user_valid_edge_idx = permute_idx[3 * selected_edges_num: 4 * selected_edges_num]
+        user_test_edge_idx = permute_idx[4 * selected_edges_num: 5 * selected_edges_num]
+        src_dst_edges=graph.find_edges(torch.arange(graph.number_of_edges(sampled_edge_type), dtype=torch.int64), sampled_edge_type)
+        train_edge_idx=[]
+        for user in user_train_edge_idx:
+            train_edge_idx+=[i for i,src in enumerate(src_dst_edges[0]) if user==src]
+        valid_edge_idx=[]
+        for user in user_valid_edge_idx:
+            valid_edge_idx+=[i for i,src in enumerate(src_dst_edges[0]) if user==src]
+        test_edge_idx=[]
+        for user in user_test_edge_idx:
+            test_edge_idx+=[i for i,src in enumerate(src_dst_edges[0]) if user==src]
 
-    # random selection of train validation and test
-    permute_idx = torch.randperm(graph.number_of_edges(sampled_edge_type))
-    train_edge_idx = permute_idx[: 3 * selected_edges_num]
-    valid_edge_idx = permute_idx[3 * selected_edges_num: 4 * selected_edges_num]
-    test_edge_idx = permute_idx[4 * selected_edges_num: 5 * selected_edges_num]
-
-    # print(f'size of train_edge_idx',len(train_edge_idx))
-    # print(f'size of valid_edge_idx',len(valid_edge_idx))
-    # print(f'size of test_edge_idx',len(test_edge_idx))
+    else:
+        # random selection of train validation and test
+        permute_idx = torch.randperm(graph.number_of_edges(sampled_edge_type))
+        train_edge_idx = permute_idx[: 3 * selected_edges_num]
+        valid_edge_idx = permute_idx[3 * selected_edges_num: 4 * selected_edges_num]
+        test_edge_idx = permute_idx[4 * selected_edges_num: 5 * selected_edges_num]
+    
     return train_edge_idx, valid_edge_idx, test_edge_idx
 
 
@@ -154,7 +173,7 @@ def get_edge_data_loader(node_neighbors_min_num: int, n_layers: int,
     # train_loader = dgl.dataloading.NodeDataLoader(
     #     graph, {sampled_node_type: train_idx}, sampler,
     #     batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
-
+ 
     # val_loader = dgl.dataloading.NodeDataLoader(
     #     graph, {sampled_node_type: valid_idx}, sampler,
     #     batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, num_workers=num_workers)
@@ -238,10 +257,5 @@ def evaluate_link_prediction(predict_scores: torch.Tensor, true_scores: torch.Te
     """
     RMSE = sqrt(mean_squared_error(true_scores.cpu().numpy(), predict_scores.cpu().numpy()))
     MAE = mean_absolute_error(true_scores.cpu().numpy(), predict_scores.cpu().numpy())
-
-    # for pred_score, true_score in zip(predict_scores,true_scores):
-    #     print(pred_score, true_score)
-
-    # raise Exception('check predict and true')
 
     return RMSE, MAE

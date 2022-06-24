@@ -3,21 +3,21 @@ import copy
 import json
 import os
 import shutil
-from signal import raise_signal
 import warnings
 import numpy as np
 from datetime import datetime
 from matplotlib import pyplot as plt
-from sklearn.preprocessing import LabelBinarizer
 import torch as th 
 import torch.nn as nn
 from tqdm import tqdm
-from LFM1b import LFM1b
+from DGL_LFM1b.DGL_LFM1b import LFM1b
 from utils.LinkScorePredictor import LinkScorePredictor
 from utils.EarlyStopping import EarlyStopping
 from model.R_HGNN import R_HGNN
 from utils.utils import evaluate_link_prediction, get_predict_edge_index, set_random_seed, get_edge_data_loader, convert_to_gpu, get_optimizer_and_lr_scheduler, get_n_params
 th.cuda.empty_cache()
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 
 
 def make_loss_plots(sample_edge_type, total_loss_vals, epochs, save_result_dir):
@@ -84,14 +84,8 @@ def evaluate(model, loader, loss_func, sampled_edge_type, device, mode):
             blocks = [convert_to_gpu(b, device=device) for b in blocks]
             positive_graph, negative_graph = convert_to_gpu(positive_graph, negative_graph, device=device)
             # target node relation representation in the heterogeneous graph
-            input_features = {(stype, etype, dtype): blocks[0].srcnodes[dtype].data['feat'] for stype, etype, dtype in
+            input_features = {(stype, etype, dtype): blocks[0].srcnodes[dtype].data['id'] for stype, etype, dtype in
                               blocks[0].canonical_etypes}
-
-            # lb = LabelBinarizer()
-            # labels = [etype for _,etype,_ in blocks[0].canonical_etypes]
-            # lb.fit(labels)
-            # relational_embedding={etype: th.tensor([float(val) for val in vector], device=args.device) for etype,vector in zip(labels, lb.transform(labels))}
-            # nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features), copy.deepcopy(relational_embedding))
 
             nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features))
 
@@ -143,20 +137,10 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
             blocks = [convert_to_gpu(b, device=args.device) for b in blocks]
             blocks = [convert_to_gpu(b, device=args.device) for b in blocks]
             positive_graph, negative_graph = convert_to_gpu(positive_graph, negative_graph, device=args.device)
-            
-            input_features = {}
-            # for (stype, etype, dtype) in blocks[0].canonical_etypes:
-            #     # blocks[0].srcnodes[dtype].data['feat'] =
-            #     # input_features[(stype, etype, dtype)]
-            #     pass
-            
-            # lb = LabelBinarizer()
-            # labels = [etype for _,etype,_ in blocks[0].canonical_etypes]
-            # lb.fit(labels)
-            # relational_embedding={etype: th.tensor([float(val) for val in vector], device=args.device) for etype,vector in zip(labels, lb.transform(labels))}
-            # nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features), copy.deepcopy(relational_embedding))
 
-            nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features))
+            input_features = {(stype, etype, dtype): blocks[0].srcnodes[dtype].data['id'] for stype, etype, dtype in blocks[0].canonical_etypes}
+
+            nodes_representation, _ = model[0](blocks, copy.deepcopy(input_features), args=args)
 
             positive_score = model[1](positive_graph, nodes_representation, sample_edge_type).squeeze(dim=-1)
             negative_score = model[1](negative_graph, nodes_representation, sample_edge_type).squeeze(dim=-1)
@@ -258,35 +242,24 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
 
 
 
-def train_models(args):
-    print('Training Process Started')
+def train_models(hg, args):
+    th.cuda.empty_cache()
     print('\n')
-
+    print('Training Process Started')
+    
     link_score_predictor = LinkScorePredictor(args.hidden_dim * args.num_heads)
     warnings.filterwarnings('ignore')
     set_random_seed(args.seed)
-
-    # using DGl's load_graphs function to load pre-computed and processed files
     
-    dataset=LFM1b(n_users=args.n_users, overwrite_raw=args.overwrite_raw, overwrite_preprocessed=args.overwrite_preprocessed, overwrite_processed=args.overwrite_processed)
-    print('Loading graph')
-    glist,_= dataset.load() # <- this file represents a subset of the full dataset
-    hg=glist[0] # hg=='heterogeneous graph' ;) from the list of graphs in the processed file (hint: theres only one) pick our heterogenous subset graph
-    # print('Dataset:')
-    # print('\n')
-    print(hg)
-    print('\n')
-
-    # creating a dictionary of every edge and it's reverse edge
     reverse_etypes = dict()
-    for stype, etype, dtype in hg.canonical_etypes: # for every edge type structured as (phi(u), psi(e), phi(v))
+    for stype, etype, dtype in hg.canonical_etypes: 
         for srctype, reltype, dsttype in hg.canonical_etypes:
             if srctype == dtype and dsttype == stype and reltype != etype:
                 reverse_etypes[etype] = reltype
                 break
 
     r_hgnn = R_HGNN(graph=hg,
-                    input_dim_dict={ntype: hg.nodes[ntype].data['feat'].shape[1] for ntype in hg.ntypes},
+                    input_dim_dict={ntype: hg.nodes[ntype].data['id'].shape[1] for ntype in hg.ntypes},
                     hidden_dim=args.hidden_dim, 
                     relation_input_dim=args.rel_input_dim,
                     relation_hidden_dim=args.rel_hidden_dim,
@@ -296,77 +269,115 @@ def train_models(args):
                     residual=args.residual, 
                     norm=args.norm)
     date=datetime.now().strftime("%d_%m_%Y_%H:%M:%S").replace(' ',"_")
-    for sample_edge_type in ['listened_to_artist','listened_to_album','listened_to_track']:
-        save_model_folder = f"results/lfm1b/{date}/{sample_edge_type}"
-        train_edge_idx, valid_edge_idx, test_edge_idx = get_predict_edge_index(
-            hg,
-            sample_edge_rate=args.sample_edge_rate,
-            sampled_edge_type=sample_edge_type,
-            seed=args.seed)
+    for sample_edge_type in [etype for _,etype,_ in hg.canonical_etypes]:
+        
+        if sample_edge_type in ['listened_to_track','listened_to_album','listened_to_artist']:
+            print('mkaing',etype,)
+            th.cuda.empty_cache()
+            save_model_folder = f"results/lfm1b/{date}/{sample_edge_type}"
+            train_edge_idx, valid_edge_idx, test_edge_idx = get_predict_edge_index(
+                hg,
+                sample_edge_rate=args.sample_edge_rate,
+                sampled_edge_type=sample_edge_type,
+                seed=args.seed,
+                use_rand=args.playcount_weight,
+                split_by_users=args.split_by_users)
 
-        train_loader, val_loader, test_loader = get_edge_data_loader(
-            args.node_min_neighbors,
-            args.num_layers,
-            hg,
-            args.batch_size,
-            sample_edge_type,
-            args.num_neg_samples,
-            train_edge_idx=train_edge_idx,
-            valid_edge_idx=valid_edge_idx,
-            test_edge_idx=test_edge_idx,
-            reverse_etypes=reverse_etypes,
-            shuffle = args.shuffle, 
-            drop_last = args.drop_last,
-            num_workers = args.num_workers
-            )
+            train_loader, val_loader, test_loader = get_edge_data_loader(
+                args.node_min_neighbors,
+                args.num_layers,
+                hg,
+                args.batch_size,
+                sample_edge_type,
+                args.num_neg_samples,
+                train_edge_idx=train_edge_idx,
+                valid_edge_idx=valid_edge_idx,
+                test_edge_idx=test_edge_idx,
+                reverse_etypes=reverse_etypes,
+                shuffle = args.shuffle, 
+                drop_last = args.drop_last,
+                num_workers = args.num_workers
+                )
+            del train_edge_idx
+            del valid_edge_idx
+            del test_edge_idx
 
-        model = nn.Sequential(r_hgnn, link_score_predictor)
-        model = convert_to_gpu(model, device=args.device)
-        print(f'Model #Params: {get_n_params(model)}.')
-        print('len(train_loader)',len(train_loader))
-        print('len(val_loader)',len(val_loader))
-        print('len(test_loader)',len(test_loader))
+            model = nn.Sequential(r_hgnn, link_score_predictor)
+            model = convert_to_gpu(model, device=args.device)
+            print('len(train_loader)',len(train_loader),'len(val_loader)',len(val_loader),'len(test_loader)',len(test_loader))
+            print(f'{sample_edge_type} Model #Params: {get_n_params(model)}')
+            optimizer, scheduler = get_optimizer_and_lr_scheduler(
+                model, 
+                args.opt, 
+                args.learing_rate, 
+                args.weight_decay,
+                steps_per_epoch=len(train_loader), 
+                epochs=args.epochs)
+            print(f'Training {sample_edge_type} link prediction model')
+            train_model(model, optimizer,scheduler, train_loader, val_loader, test_loader, save_model_folder, sample_edge_type, date, args)
+    del model
+    del optimizer
+    del scheduler
+    del train_loader
+    del val_loader
+    del test_loader
+    
 
-        # print(f'{sample_edge_type} Model #Params: {get_n_params(model)}.')
-        optimizer, scheduler = get_optimizer_and_lr_scheduler(
-            model, 
-            args.opt, 
-            args.learing_rate, 
-            args.weight_decay,
-            steps_per_epoch=len(train_loader), 
-            epochs=args.epochs)
-        print(f'Training {sample_edge_type} link prediction model')
-        train_model(model, optimizer,scheduler, train_loader, val_loader, test_loader, save_model_folder, sample_edge_type, date, args)
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--n_users', default=None, type=int, help='subset parameter')
     parser.add_argument('--seed', default=0, type=int, help='seed for reproducibility')
-    parser.add_argument('--sample_edge_rate', default=0.05, type=float, help='train: validate: test ratio')
+    parser.add_argument('--sample_edge_rate', default=0.01, type=float, help='train: validate: test ratio')
     parser.add_argument('--num_layers', default=2, type=int, help='number of convolutional layers for a model')
     parser.add_argument('--batch_size', default=512, type=int, help='the number of edges to train in each batch')
     parser.add_argument('--num_neg_samples', default=5, type=int, help='the number of negative edges to sample when training')
     parser.add_argument('--node_min_neighbors', default=10, type=int, help='the number of nodes to sample per target node')
-    parser.add_argument('--shuffle',  default=True, type=bool, help='wether to shuffle indicies before splitting')
-    parser.add_argument('--drop_last',  default=False, type=bool, help='wether to drop the last sample in data loading')
+    parser.add_argument('--shuffle',  default=True, type=str2bool, nargs='?', const=True, help='string bool wether to shuffle indicies before splitting')
+    parser.add_argument('--drop_last',  default=False, type=str2bool, nargs='?', const=True, help='string bool wether to drop the last sample in data loading')
     parser.add_argument('--num_workers', default=4, type=int, help='number of workers for a specified data loader')
-    parser.add_argument('--hidden_dim', default=32, type=int, help='dimension of the hidden layer input')
+    parser.add_argument('--hidden_dim', default=64, type=int, help='dimension of the hidden layer input')
     parser.add_argument('--rel_input_dim', default=12, type=int, help='input dimension of the edges')
-    parser.add_argument('--rel_hidden_dim', default=32, type=int, help='hidden dimension of the edges')
-    parser.add_argument('--num_heads', default=12, type=int, help='the number of attention heads used')
-    parser.add_argument('--dropout', default=0.5, type=float, help='the dropout rate for the models')
-    parser.add_argument('--residual', default=True, type=bool, help='using the residual values in computation')
-    parser.add_argument('--norm', default=True, type=bool, help='using normalization of values in computation')
+    parser.add_argument('--rel_hidden_dim', default=64, type=int, help='hidden dimension of the edges')
+    parser.add_argument('--num_heads', default=8, type=int, help='the number of attention heads used')
+    parser.add_argument('--dropout', default=0.9, type=float, help='the dropout rate for the models')
+    parser.add_argument('--residual', default=True, type=str2bool, nargs='?', const=True, help='string for using the residual values in computation')
+    parser.add_argument('--norm', default=True, type=str2bool, nargs='?', const=True, help=' string for using normalization of values in computation')
     parser.add_argument('--opt', default='adam', type=str, help='the name of the optimizer to be used')
     parser.add_argument('--learing_rate', default=0.001, type=float, help='the learning rate used for training')
-    parser.add_argument('--weight_decay', default=0.00, type=float, help='the decay of the weights used for training')
+    parser.add_argument('--weight_decay', default=0.0005, type=float, help='the decay of the weights used for training')
     parser.add_argument('--epochs', default=200, type=int, help='the number of epochs to train the model with')
-    parser.add_argument('--device', default='cuda', type=str, help='the gpu device used for computation')
-    parser.add_argument('--patience', default=50, type=int, help='the number of epochs to allow before early stopping')
-    parser.add_argument('--overwrite_raw', default=False, type=bool, help='overwrites the original data collection by unzipping the zip file')
-    parser.add_argument('--overwrite_preprocessed', default=False, type=bool, help='overwrites the preprocessed data by running dataset loader')
-    parser.add_argument('--overwrite_processed', default=False, type=bool, help='overwrites processed graph file, by compiling graph')
-    args = parser.parse_args()
+    parser.add_argument('--device', default='cpu', type=str, help='the gpu device used for computation')
+    parser.add_argument('--patience', default=25, type=int, help='the number of epochs to allow before early stopping')
+    parser.add_argument('--name', default='DGL_LFM1b', type=str, help='name of directory in data folder')
+    parser.add_argument('--n_users', default=None, type=str, help="number of LE rows rto collect for a subset of the full dataset")
+    parser.add_argument('--overwrite_preprocessed', default=False, type=str2bool, nargs='?', const=True, help='string indication wheter to overwrite preprocessed ')
+    parser.add_argument('--overwrite_processed', default=False, type=str2bool, nargs='?', const=True, help='string indication wheter to overwrite processed')
+    parser.add_argument('--artists', default=True, type=str2bool, nargs='?', const=True, help='string indication wheter to use the artist and genre nodes in the graph')
+    parser.add_argument('--albums', default=True, type=str2bool, nargs='?', const=True, help='string indication wheter to use the albums and genre nodes in the graph')
+    parser.add_argument('--tracks', default=True, type=str2bool, nargs='?', const=True, help='string indication wheter to use the tracks and genre nodes in the graph')
+    parser.add_argument('--playcount_weight', default=False, type=str2bool, nargs='?', const=True, help='Specifiy whether or not the weighted edge playcount connection between users and their listened artists/tracks/albums is applied')
+    parser.add_argument('--split_by_users', default=False, type=str2bool, nargs='?', const=True, help='boolean inidicator if you want to split graph by users and not just edges')
  
-    train_models(args)
+
+ 
+    args = parser.parse_args()
+    print('running with args','\n')
+    print(args)
+
+    dataset=LFM1b(n_users=args.n_users, overwrite_preprocessed=args.overwrite_preprocessed, overwrite_processed=args.overwrite_processed, artists=args.artists, albums=args.albums, tracks=args.tracks, playcount_weight=args.playcount_weight)
+    print('Loading graph')
+    glist,_= dataset.load()
+    hg=glist[0] 
+    print(hg)
+
+    train_models(hg, args)
     
