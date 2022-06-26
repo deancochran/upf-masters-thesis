@@ -5,7 +5,7 @@ import torch.nn as nn
 import dgl
 from dgl.data.utils import load_graphs
 import torch
-from sklearn.metrics import f1_score, mean_squared_error, mean_absolute_error
+from sklearn.metrics import roc_auc_score, average_precision_score, mean_squared_error, mean_absolute_error
 from ogb.nodeproppred import Evaluator
 from math import sqrt
 
@@ -226,26 +226,26 @@ def get_optimizer_and_lr_scheduler(model: nn.Module, optimizer_name: str, learni
     return optimizer, scheduler
 
 
-def evaluate_node_classification(predicts: torch.Tensor, labels: torch.Tensor):
-    """
-    get evaluation metrics for node classification, calculate accuracy and macro_f1 metrics
-    :param predicts: Tensor, shape (N, )
-    :param labels: Tensor, shape (N, )
-    :return:
-    """
-    evaluator = Evaluator(name='ogbn-mag')
+# def evaluate_node_classification(predicts: torch.Tensor, labels: torch.Tensor):
+#     """
+#     get evaluation metrics for node classification, calculate accuracy and macro_f1 metrics
+#     :param predicts: Tensor, shape (N, )
+#     :param labels: Tensor, shape (N, )
+#     :return:
+#     """
+#     evaluator = Evaluator(name='ogbn-mag')
 
-    predictions = predicts.cpu().numpy()
-    labels = labels.cpu().numpy()
+#     predictions = predicts.cpu().numpy()
+#     labels = labels.cpu().numpy()
 
-    accuracy = evaluator.eval({
-        "y_true": labels.reshape(-1, 1),
-        "y_pred": predictions.reshape(-1, 1)
-    })['acc']
+#     accuracy = evaluator.eval({
+#         "y_true": labels.reshape(-1, 1),
+#         "y_pred": predictions.reshape(-1, 1)
+#     })['acc']
 
-    macro_f1 = f1_score(y_true=labels, y_pred=predictions, average='macro')
+#     macro_f1 = f1_score(y_true=labels, y_pred=predictions, average='macro')
 
-    return accuracy, macro_f1
+#     return accuracy, macro_f1
 
 
 def evaluate_link_prediction(predict_scores: torch.Tensor, true_scores: torch.Tensor):
@@ -257,5 +257,7 @@ def evaluate_link_prediction(predict_scores: torch.Tensor, true_scores: torch.Te
     """
     RMSE = sqrt(mean_squared_error(true_scores.cpu().numpy(), predict_scores.cpu().numpy()))
     MAE = mean_absolute_error(true_scores.cpu().numpy(), predict_scores.cpu().numpy())
+    AUC = roc_auc_score(true_scores.cpu().numpy(), predict_scores.cpu().numpy())
+    AP = average_precision_score(true_scores.cpu().numpy(), predict_scores.cpu().numpy())
 
-    return RMSE, MAE
+    return RMSE, MAE, AUC, AP

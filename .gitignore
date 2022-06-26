@@ -122,4 +122,5 @@ DGL_LFM1b/.gitignore
 .vscode/
 data/*
 
-.OpenHGNN/*
+OpenHGNN
+OpenHGNN/*

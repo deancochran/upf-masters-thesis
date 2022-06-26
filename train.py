@@ -17,8 +17,8 @@ from model.R_HGNN import R_HGNN
 from utils.utils import *
 th.cuda.empty_cache()
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-def smooth(y, box_pts=10):
+ 
+def smooth(y, box_pts=3):
     box = np.ones(box_pts)/box_pts
     y_smooth = np.convolve(y, box, mode='same')
     return y_smooth
@@ -33,35 +33,65 @@ def make_loss_plots(sample_edge_type, total_loss_vals, epochs, save_result_dir):
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.ylim((0, 1))
-    plt.yticks(np.arange(0, 2, step=0.2))
+    plt.yticks(np.arange(0, 1, step=0.2))
     plt.legend()
     plt.savefig(save_result_dir+f"/{sample_edge_type}_loss_plot.png")
+
+def make_AUC_plots(sample_edge_type, AUC_vals, epochs, save_result_dir):
+    zero_pad=[0 for epoch in range(epochs-len(AUC_vals['train']))]
+    plt.figure()
+    plt.plot(range(epochs), smooth(AUC_vals['train']+zero_pad), 'r', label='Training AUC')
+    plt.plot(range(epochs), smooth(AUC_vals['val']+zero_pad), 'g', label='Val AUC')
+    plt.plot(range(epochs), smooth(AUC_vals['test']+zero_pad), 'b', label='Test AUC')
+    plt.title(f'{sample_edge_type} link-pred Train, Val, Test AUC')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.ylim((0, 1))
+    plt.yticks(np.arange(0, 1, step=0.2))
+    plt.legend()
+    plt.savefig(save_result_dir+f"/{sample_edge_type}_auc_plot.png")
+
+
+def make_AP_plots(sample_edge_type, AP_vals, epochs, save_result_dir):
+    zero_pad=[0 for epoch in range(epochs-len(AP_vals['train']))]
+    plt.figure()
+    plt.plot(range(epochs), smooth(AP_vals['train']+zero_pad), 'r', label='Training AP')
+    plt.plot(range(epochs), smooth(AP_vals['val']+zero_pad), 'g', label='Val AP')
+    plt.plot(range(epochs), smooth(AP_vals['test']+zero_pad), 'b', label='Test AP')
+    plt.title(f'{sample_edge_type} link-pred Train, Val, Test AP')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.ylim((0, 1))
+    plt.yticks(np.arange(0, 1, step=0.2))
+    plt.legend()
+    plt.savefig(save_result_dir+f"/{sample_edge_type}_ap_plot.png")
+
 
 def make_RMSE_plots(sample_edge_type, RMSE_vals, epochs, save_result_dir):
     zero_pad=[0 for epoch in range(epochs-len(RMSE_vals['train']))]
     plt.figure()
-    plt.plot(range(epochs), RMSE_vals['train']+zero_pad, 'r', label='Training RMSE')
-    plt.plot(range(epochs), RMSE_vals['val']+zero_pad, 'g', label='Val RMSE')
-    plt.plot(range(epochs), RMSE_vals['test']+zero_pad, 'b', label='Test RMSE')
+    plt.plot(range(epochs), smooth(RMSE_vals['train']+zero_pad), 'r', label='Training RMSE')
+    plt.plot(range(epochs), smooth(RMSE_vals['val']+zero_pad), 'g', label='Val RMSE')
+    plt.plot(range(epochs), smooth(RMSE_vals['test']+zero_pad), 'b', label='Test RMSE')
     plt.title(f'{sample_edge_type} link-pred Train, Val, Test RMSE')
     plt.xlabel('Epochs')
     plt.ylabel('RMSE')
     plt.ylim((0, 1))
-    plt.yticks(np.arange(0, 2, step=0.2))
+    plt.yticks(np.arange(0, 1, step=0.2))
     plt.legend()
     plt.savefig(save_result_dir+f"/{sample_edge_type}_rmse_plot.png")
 
 def make_MAE_plots(sample_edge_type, MAE_vals, epochs, save_result_dir):
     zero_pad=[0 for epoch in range(epochs-len(MAE_vals['train']))]
     plt.figure()
-    plt.plot(range(epochs), MAE_vals['train']+zero_pad, 'r', label='Training MAE')
-    plt.plot(range(epochs), MAE_vals['val']+zero_pad, 'g', label='Val MAE')
-    plt.plot(range(epochs), MAE_vals['test']+zero_pad, 'b', label='Test MAE')
+    plt.plot(range(epochs), smooth(MAE_vals['train']+zero_pad), 'r', label='Training MAE')
+    plt.plot(range(epochs), smooth(MAE_vals['val']+zero_pad), 'g', label='Val MAE')
+    plt.plot(range(epochs), smooth(MAE_vals['test']+zero_pad), 'b', label='Test MAE')
     plt.title(f'{sample_edge_type} link-pred Train, Val, Test MAE')
     plt.xlabel('Epochs')
     plt.ylabel('MAE')
     plt.ylim((0, 1))
-    plt.yticks(np.arange(0, 2, step=0.2))
+    plt.yticks(np.arange(0, 1, step=0.2))
     plt.legend()
     plt.savefig(save_result_dir+f"/{sample_edge_type}_mae_plot.png")
 
@@ -131,6 +161,8 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
     total_loss_vals={'train':[],'val':[],'test':[]}
     RMSE_vals={'train':[],'val':[],'test':[]}
     MAE_vals={'train':[],'val':[],'test':[]}
+    AUC_vals={'train':[],'val':[],'test':[]}
+    AP_vals={'train':[],'val':[],'test':[]}
     for epoch in tqdm_loader:
         model.train()
         train_y_trues = []
@@ -166,12 +198,14 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
         train_total_loss /= (batch + 1)
         train_y_trues = th.cat(train_y_trues, dim=0)
         train_y_predicts = th.cat(train_y_predicts, dim=0)
-        train_RMSE, train_MAE = evaluate_link_prediction(
+        train_RMSE, train_MAE, train_AUC, train_AP = evaluate_link_prediction(
             predict_scores=train_y_predicts, 
             true_scores=train_y_trues)
         total_loss_vals['train'].append(train_total_loss)
         RMSE_vals['train'].append(train_RMSE)
         MAE_vals['train'].append(train_MAE)
+        AUC_vals['train'].append(train_AUC)
+        AP_vals['train'].append(train_AP)
 
         model.eval()
 
@@ -182,12 +216,14 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
             sampled_edge_type=sample_edge_type,
             device=args.device, 
             mode='validate')
-        val_RMSE, val_MAE = evaluate_link_prediction(
+        val_RMSE, val_MAE, val_AUC, val_AP = evaluate_link_prediction(
             predict_scores=val_y_predicts,
             true_scores=val_y_trues)
         total_loss_vals['val'].append(val_total_loss)
         RMSE_vals['val'].append(val_RMSE)
         MAE_vals['val'].append(val_MAE)
+        AUC_vals['val'].append(val_AUC)
+        AP_vals['val'].append(val_AP)
 
         test_total_loss, test_y_trues, test_y_predicts = evaluate(
             model, 
@@ -196,19 +232,22 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
             sampled_edge_type=sample_edge_type,
             device=args.device, 
             mode='test')
-        test_RMSE, test_MAE = evaluate_link_prediction(
+        test_RMSE, test_MAE, test_AUC, test_AP = evaluate_link_prediction(
             predict_scores=test_y_predicts,
             true_scores=test_y_trues)
         total_loss_vals['test'].append(test_total_loss)
         RMSE_vals['test'].append(test_RMSE)
         MAE_vals['test'].append(test_MAE)
+        AUC_vals['test'].append(test_AUC)
+        AP_vals['test'].append(test_AP)
 
         if best_validate_RMSE is None or val_RMSE < best_validate_RMSE:
             best_validate_RMSE = val_RMSE
-            scores = {"RMSE": float(f"{test_RMSE:.4f}"), "MAE": float(f"{test_MAE:.4f}")}
+            scores = {"RMSE": float(f"{test_RMSE:.4f}"), "MAE": float(f"{test_MAE:.4f}"),"AUC": float(f"{test_AUC:.4f}"), "AP": float(f"{test_AP:.4f}")}
             final_result = json.dumps(scores, indent=4)
 
-        tqdm_loader.set_description(f'EPOCH #{epoch} train loss: {train_total_loss:.4f}, validate loss: {val_total_loss:.4f}, train RMSE: {train_RMSE:.4f}, validate RMSE: {val_RMSE:.4f} ')
+        tqdm_loader.set_description(f'EPOCH #{epoch} RMSE: {test_RMSE:.4f}, MAE: {test_MAE:.4f}, AUC: {test_AUC:.4f}, AP: {test_AP:.4f} ')
+        
         # print(
         #     f'Epoch: {epoch}, learning rate: {optimizer.param_groups[0]["lr"]}, train loss: {train_total_loss:.4f}, RMSE {train_RMSE:.4f}, MAE {train_MAE:.4f}, \n'
         #     f'validate loss: {val_total_loss:.4f}, RMSE {val_RMSE:.4f}, MAE {val_MAE:.4f}, \n'
@@ -232,12 +271,16 @@ def train_model(model, optimizer,scheduler, train_loader, val_loader, test_loade
 
     save_args_path = os.path.join(save_result_dir, f"args.json")
     with open(save_args_path, 'w') as file:
-        file.write(json.dumps(vars(args), indent=4))
+        arg_dict=vars(args)
+        arg_dict['model_parameters']=get_n_params(model)
+        file.write(json.dumps(arg_dict, indent=4))
         file.close()
 
     make_loss_plots(sample_edge_type, total_loss_vals, args.epochs, save_result_dir)
     make_RMSE_plots(sample_edge_type, RMSE_vals, args.epochs, save_result_dir)
     make_MAE_plots(sample_edge_type, MAE_vals, args.epochs, save_result_dir)
+    make_AUC_plots(sample_edge_type, AUC_vals, args.epochs, save_result_dir)
+    make_AP_plots(sample_edge_type, AP_vals, args.epochs, save_result_dir)
 
     print(f'save as {save_result_dir}')
     print(f"predicted relation: {sample_edge_type}")
@@ -274,7 +317,8 @@ def train_models(hg, args):
     for sample_edge_type in [etype for _,etype,_ in hg.canonical_etypes]:
 
         if sample_edge_type in ['listened_to_track','listened_to_album','listened_to_artist']:
-            print('making',sample_edge_type,'model')
+            print('\n','Training',sample_edge_type,'Model')
+            print(hg)
             th.cuda.empty_cache()
             save_model_folder = f"results/lfm1b/{date}/{sample_edge_type}"
             train_edge_idx, valid_edge_idx, test_edge_idx = get_predict_edge_index(
@@ -307,7 +351,7 @@ def train_models(hg, args):
             model = nn.Sequential(r_hgnn, link_score_predictor)
             model = convert_to_gpu(model, device=args.device)
             print('len(train_loader)',len(train_loader),'len(val_loader)',len(val_loader),'len(test_loader)',len(test_loader))
-            print(f'{sample_edge_type} Model #Params: {get_n_params(model)}')
+            print(f'Model #Params: {get_n_params(model)}')
             optimizer, scheduler = get_optimizer_and_lr_scheduler(
                 model, 
                 args.opt, 
@@ -340,7 +384,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=0, type=int, help='seed for reproducibility')
     parser.add_argument('--sample_edge_rate', default=0.2, type=float, help='train: validate: test ratio')
     parser.add_argument('--num_layers', default=2, type=int, help='number of convolutional layers for a model')
-    parser.add_argument('--batch_size', default=1024, type=int, help='the number of edges to train in each batch')
+    parser.add_argument('--batch_size', default=512, type=int, help='the number of edges to train in each batch')
     parser.add_argument('--num_neg_samples', default=5, type=int, help='the number of negative edges to sample when training')
     parser.add_argument('--node_min_neighbors', default=10, type=int, help='the number of nodes to sample per target node')
     parser.add_argument('--shuffle',  default=True, type=str2bool, nargs='?', const=True, help='string bool wether to shuffle indicies before splitting')
@@ -350,12 +394,12 @@ if __name__ == '__main__':
     parser.add_argument('--rel_input_dim', default=12, type=int, help='input dimension of the edges')
     parser.add_argument('--rel_hidden_dim', default=32, type=int, help='hidden dimension of the edges')
     parser.add_argument('--num_heads', default=8, type=int, help='the number of attention heads used')
-    parser.add_argument('--dropout', default=0.5, type=float, help='the dropout rate for the models')
+    parser.add_argument('--dropout', default=0.8, type=float, help='the dropout rate for the models')
     parser.add_argument('--residual', default=True, type=str2bool, nargs='?', const=True, help='string for using the residual values in computation')
     parser.add_argument('--norm', default=True, type=str2bool, nargs='?', const=True, help=' string for using normalization of values in computation')
     parser.add_argument('--opt', default='adam', type=str, help='the name of the optimizer to be used')
-    parser.add_argument('--learing_rate', default=0.0001, type=float, help='the learning rate used for training')
-    parser.add_argument('--weight_decay', default=0.0, type=float, help='the decay of the weights used for training')
+    parser.add_argument('--learing_rate', default=0.001, type=float, help='the learning rate used for training')
+    parser.add_argument('--weight_decay', default=0.005, type=float, help='the decay of the weights used for training')
     parser.add_argument('--epochs', default=200, type=int, help='the number of epochs to train the model with')
     parser.add_argument('--patience', default=25, type=int, help='the number of epochs to allow before early stopping')
     parser.add_argument('--split_by_users', default=False, type=str2bool, nargs='?', const=True, help='boolean inidicator if you want to split train/val/test by users and not just targetedges')
