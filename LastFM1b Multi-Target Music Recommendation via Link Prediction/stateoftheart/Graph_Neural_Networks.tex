@@ -1,0 +1,124 @@
+\section{Graph Neural Networks}
+
+Due to the relevancy of Graph neural networks within the field of recommendation, and given that this thesis will be utilizing graph neural networks to compute predictions using complex mathematics. It is worth devoting some time to discuss the fundamentals of graph networks in the context of music recommendation.
+
+\section{Fundamentals of Graph Neural Networks}
+
+% (IMAGE OF GRAPH HERE)
+
+A graph can be represented as a set of edges/links as vertices/nodes, one can model a real world scenario of a set of objects and their connections as a graph quite easily. In fact, just due to the sheer structure of a graph data base, Graph Neural Networks have led to massive performance improvements and new discoveries in industries. 
+% like e-commerce, ETA estimation, molecular modeling, and more. Clearly graph base machine learning has become more than just a fad.  Some note worthy examples of these tasks include , Pinterest's deployment of the PinSage link-level prediction model for recommendations to users (CITE), and Google Maps' Traffic ETA estimation utilizing graph networks (CITE), AlphaFold's molecular generation(CITE), and others....
+
+Graphs can also be undirected or directed. In an undirected graph, nodes connected share a two sided relationship represented as an edge. In a directed graph, connected nodes do not share an edge, rather if two nodes are connected to each other in a directed graph, the relationship type of the edges are different. Another way of classifying graphs is by whether they are unweighted or weighted. In an unweighted graph, all edges have the same weight. In a weighted graph, each edge is associated with a number representing its weight.The graphs we have discussed so far have been examples of homogeneous graphs. In homogeneous graphs, all nodes have the same type, as do all edges. In a heterogeneous graph, nodes can be of different types, and there can be different types of edges between them. 
+
+% (picture as a GRAPH HERE)
+
+Common representations of graphs include images, text, molecules, social networks, and citation networks. To incorporate complexity into the graph, we can store features to describe the edges, vertices, and even the global graph. Specifically, the way the graphs connectivity is stored is inside an adjacency matrix where all node connection cells in the matrix are represented in a binary format.
+
+\subsection{GNN tasks}
+
+GNNs are so popular in modern research because they able to achieve state of the art performance in a wide variety of research domains for various tasks. With the understanding of the necessary requirements to create a graph, we are able to utilize the existence of node, edge, global graph, and connectivity information to form inputs for a graph based neural network. A common way to solve these problems is to embed the graph nodes into a low dimension embedding space. Once in this embedding space the nodes must capture task specific information such that the utilize of standard ML classifiers may predict with accuracy. 
+
+Once a graph and its components has been formed with their embedding representations, the information in the nodes, edges, as well as the structural information of the full graph can be utilized for a variety of different prediction tasks.
+
+% (NODE LEVEL TASK IMAGE)
+
+"Node-level" prediction tasks have the objective to predict the classification of a particular unseen node the in the graph (ex. predicting if a unseen word is a noun, verb, adverb, etc...). TO accomplish this, you can utilize a classifier function (or another ML model) to classifier each of the nodes labels 
+
+
+% (EDGE LEVEL TASK IMAGE)
+
+
+"Edge-level" prediction tasks have the goal of predicting interactions between two given nodes in the graph (like recommending songs to users in a music recommendation system). To accomplish this you can utilize the two nodes and the edge connecting them as inputs into a prediction function to provide the likelihood of the existence of the edge occurring between the two nodes.
+
+% (GRAPH LEVEL TASK IMAGE)
+
+For "graph-level" tasks, the goal is to predict the property of an entire unseen graph (ex. predicting the label of a particular image. To accomplish this, the embedding from each of the resulting nodes are used in some kind of aggregation function which is then utilize inside some function to predict a the label of a full graph representation \cite{GnnIntro2021}
+
+
+\subsection{Understanding GNNs}
+
+To dive into the specifics of a graph neural network model, we will look at a basic  Graph Neural Network model. As an assumption, we can assume that for the following, there exists an unweighted and undirected graph such that the adjacency matrix is binary and symmetric with cells of ones and zeros according to the connectivity of the nodes.
+
+% (Example image of graph represented as a adjaceny matrix goes here)
+
+With the information formed by the adjacency matrix the next step is to use the matrix to aggregate neighbouring node representations for each layer specified by applying an operation
+
+% H'=o(AHW), where W is a learnable nodewise share linear transofrmation and o is a nonlinear activastion function
+
+
+Notably in this high level overview, the information of each target node is not retained in the transformation that occurs with every layer. Therefore to adjust for this we can utilize a simple matrix summation of to add what is commonly referred to as self loops.
+
+% This hence adjust the update rule as H'=o(A'HW), where A'=A+I. Or you can write it node wise as h'i=o(sum(Wh'j)) for each j neighbor in the neighborhood of node i
+
+% (This process is labeled as sum pooling becuase you are pooling over all of the neighbours withb an aggregation function)
+
+There do exist some known limitations of this. When multiplying by the adjacency matrix can increase the scale of the features of each subsequent layer. To provide remedy to this effect we need to normalize appropriately. \cite{sanchez2021gentle}
+
+% H'=o(D'-1A'HW), where D' is the degree matrix of A' s.t. D'ii = sum(A'ij)
+
+% which is often known as the mean-pooling update rule written as a node wise update function 
+
+% h'i = o(sum(1/|Ni|*Wh'j)) for every node j in the neighborhood of node 
+
+\subsection{Graph Convolutional Network example}
+
+% (PICTURE)
+
+Instead of the previous function, where the matrix was normalized with the degree matrix, we can normalize the adjacency matrix in more expressive ways. One example, all it being one of the more popular approaches. The Graph Convolutional Network approach (\cite{kipf17} uses what is known as symmetric normalization 
+
+% The update fucniton appearing as:
+
+% H'=o(D'-1/2*A'*D'-1/2*H*W)
+% which when written out node wise appears as h'i = o(sum( 1/sqrt(|Ni|*|Nj|) * Wh'j ))
+
+This is a simple yet powerful model and it also the most cited GNN paper. Upon each update layer of the network, the update function will be called node wise on all nodes in the graph. This is similar in concept to a traditional neural network as the output from the first layer is the input to the second layer. The difference is that their is an additional processing step where each target node updates its feature representations by aggregating the incoming messages passed from its neighbors.
+
+This leads to some very expressive embedding representations as the number of GCN layers correspond to an an upper bound on how far information from a particular node can travel. For a GNN with multiple layers, a target node's features can only be incorporated into the features of all nodes whom are k hops away from the target node; where k=the number of layers in the GNN model.
+
+Some limitations of this model include the assumption of the adjacency matrix being binary and symmetric, limiting the GCN model as it only indirectly supports edge features. This means that GCNs aren't suitable for propagating information between nodes of different types, or pairs nodes whose edge connection are of multiple types. 
+
+To alleviate this you can utilize edge-wise mechanisms, as when compared to node-wise mechanisms, we can send 'messages' being a vector representation of a node, along graph edges which can be weighted and conditioned
+
+\section{Frameworks for Graph Neural Networks}
+
+As GNNs have becoming increasing more complex over the years. There has been a lot discussion amongst the machine learning community to provide a suitable open source library capable of computing complex graph based analysis to increase the reprehensibility of authors research.
+
+Additionally, the common machine learning frameworks of Pytorch and TensorFlow only optimize for workflows with fixed size computation graphs. These assumptions do not hold for GNN training. Recalling the previous discussion on  mini batch training. As an example, each target node in the batch has a specified computational graph that are different from every other node. Additionally for neighbor sampling, the neighbors used for each epoch of mini batch training are going to be different. This is why there are specialized frameworks for deep graph learning.
+
+As a result to this outreach, several sub-communities have devoted the necessary time to provide frameworks for researchers wanting to begin utilizing graph neural networks for machine learning or graph analysis research. Of the frameworks that exist in the field there are a handful that are most popular amongst users.
+
+Specifically open source frameworks like PyTorch Geometric, Deep Graph Library Stellar, and Networkx have been in development since 2018. The frameworks facilitate the steep learning requirements for implementing deep learning GNN functionalities like message passing, aggregation, update functions, sampling, and data management. These libraries are constantly being updated as well as utilized by the worlds most renowned researchers in the field of Graph neural networks.
+ 
+\section{A brief word on heterogeneous graphs}
+
+So far there has only been discussion on homogeneous graphs, but for this thesis and its methodological approach, it requires the use of a heterogeneous network (graphs have multiple node and edge types).
+
+Many real world problems can be represented as a heterogeneous graph. The addition of node types and edge types in the node update function allows heterogeneous models to enhance the final node representation by incorporating semantic relationships nodes and edges of different types contain. This brings the discussion to how heterogeneous graph representations can be made for real world applications. In most cases heterogeneous graphs are irregular, and sparse. Therefore beginner researchers often have difficulty understanding, let alone interpreting deep learning heterogeneous graph models. OpenHgnn \cite{hgRepAndApp2022} an open source project that builds of the Deep graph Library (cite) has developed an friendly and easy-to-use for novice heterogeneous graph deep learning research.
+
+Their open source material offers hands on modeling of training workflows, as well as insight into how heterogeneous models compute their low dimension embedding. This is particularly useful as node embedding representation is a core value for graph based tasks, as for most if not all types of tasks, the node's embedded representation is utilized to preform prediction or classification of unseen nodes/edges. 
+
+\section{Why use Graph Neural Networks}
+
+A common question that is brought up when discussing the new field of Graph Neural Networks (GNNs); "why use them?" In many cases where graph networks can be applied, so can other deep learning methods. To briefly address this, it is often the case best to think about an example of image classification. As it has been well established in machine learning research, Convolutional Neural Networks have been one the most successful model types to classify images. The general form of the model works by implementing convolutional layers, where the goal of one of these layers is to take generalize the image given. A single layer does this by traversing over each pixel in an image and aggregating the pixel's neighboring pixels to update the target pixels representation. 
+
+As we will discuss later, this concept of traversing over each pixel can be generalized for graph neural networks. The difference between CNNs and GNNs then notably that GNNs are node order invariant. Meaning for a graph neural network image classification task, each pixel, represented as a node, does not need to have a fixed number of incoming or outgoing neighbors like pixels in an image. There can be several neighbours, or edges of a fixed kind reaching a target pixel node. Therefore, if a graph convolution operator was applied on an image, the pixels updated in every layer would be updated by nodes that could exist outside the set of directly neighbouring pixels. More information on the fundamental significance of node order in variance can be found online. \cite{sanchez2021gentle}
+
+There are some pre-existing challenges that come with deploying a graph convolutional layer. The amount of computations required should not be larger than amount of storage it takes to store the graph itself. Additionally, there should be a fixed number of parameters for each specific convolution layer, as well as being able to act on only a local neighbourhood on a target node. Also, it should be able to specify an importance weight to different neighbours as well as be applicable to inductive problems. \cite{kipf17}
+
+
+\subsection{Music Recommendation with GNNs}
+Industry level recommendation systems work on industrial sized data, most of which is not publicly accessible for researchers and the academic community surrounding the field. As a result to this, there is a lot of advocacy for publicly available recommendation data sets. This concept being no exception in the music recommendation field. Researchers are left with very few amply sized data sets for academic research. Commonly, most MRS papers who utilize data sets that provide large collections of not just users, but the user listening history. 
+
+Million song data set (cite MSD) offers information on genres, lyrics, similarity information, and play count information for each users listening history. The LastFM data set is a collection of artist, and tags for each users listening behaviours. The 30 Music data set contains information on artist, track, playlist, and genres collected through through the LastFM API. Yahoo! Labs have released collections that provide ratings on artists and songs, respectively, but not user play events. 
+
+However, much of this listening-specific information is limited as well. The MSD has some sparsity issues, with the LastFM data sets do not provide complex features for lyrical analysis. Leaving the LastFM API based data sets like 30Music in a similar limitation. This research issue of no perfect music recommendation data set seems to be well understood by the MIR community. From within the academic community in 2017 the the LastFM1b \cite{LFM1b} was released with a collection artist, and tags for each users listening behaviours. What was notably different about this data set was that the LastFM1b collection offers over one billion timestamped listening events, well over twenty times the amount that MSD offers. Specifically, with deep learning which requires large collections of data to be utilized for training, the LastFM 1b enables large-scale experimentation in music retrieval and recommendation. 
+
+Whilst deep learning by now is surely not a new topic in music recommendation, graph neural networks have definitely been utilized with in the the music industry. In the past decade a significant increase in graph based machine learning papers have shown their relevancy within their selective topic of choice. Topics like modeling expressive piano performance \cite{jeong19}, measuring similarity between artists \cite{Oramas2021}, and others made great leaps into a new field of machine learning study as General Neural Network models have become more popular in the last decade.
+
+With the rise of Graph Convectional Networks specifically \cite{kipf17} \cite{rgcn2017}, GNNs have become the most popular machine learning research topic in the recent years. Particularly due to the constantly evolving field, there are a lot of new research findings within the topic of music recommendation with graph based deep learning. These newer methods focus on one of the many fundamental challenges graph networks are good at modelling, representation learning (a method to compute vector representations of nodes that can be measured in an embedding space).\cite{Gao2021}
+
+Utilizing computed representations for recommendation within the domain of music has long been established as common practice \cite{raimond2007music}. As such practices for graph neural networks are constantly evolving, research like Galvan's Contributions to Representation Learning with Graph Auto encoders and Applications to Music Recommendation have shed more light on to this specific matter. \cite{Galvan22} Most notably however, there have been major improvements in learning the node representations to assist downstream tasks like link prediction and recommendation.\cite{Hamilton2020}\cite{kipf2020deep}
+
+
+

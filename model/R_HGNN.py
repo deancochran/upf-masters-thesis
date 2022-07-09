@@ -157,21 +157,9 @@ class RelationGraphConv(nn.Module):
         graph.dstdata.update({'e_dst': e_dst})
         # compute edge attention, e_src and e_dst are a_src * Wh_src and a_dst * Wh_dst respectively.
         graph.apply_edges(fn.u_add_v('e_src', 'e_dst', 'e'))
-
         # shape (edges_num, heads, 1)
-        # e = self.leaky_relu(graph.edata.pop('e'))
-        # graph.edata['a'] = edge_softmax(graph, e)
-        
-        
-        if args!=None and graph.etypes[0] in ['listened_to_track','listened_to_album','listened_to_artist']:
-            if args.playcount_weight==True:
-                # compute softmax
-                graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e'))*graph.edata['weight'].unsqueeze(1))
-            else:
-                graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e')))
-        else:
-            graph.edata['a'] = edge_softmax(graph, self.leaky_relu(graph.edata.pop('e')))
-
+        e = self.leaky_relu(graph.edata.pop('e'))
+        graph.edata['a'] = edge_softmax(graph, e)
         graph.update_all(fn.u_mul_e('ft', 'a', 'msg'), fn.sum('msg', 'feat'))
         # (N_dst, n_heads * hidden_dim), reshape (N_dst, n_heads, hidden_dim)
         dst_features = graph.dstdata.pop(

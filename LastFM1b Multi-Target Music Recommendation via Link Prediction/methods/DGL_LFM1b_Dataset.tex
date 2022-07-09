@@ -1,0 +1,80 @@
+\section{DGL LFM1b Data set}
+
+In the field of MRS there are a few well know data sets that have risen to popularity. Most notably, the Million song data set (MSD) and LastFM data set have been utilized the most in MRS research. Particularly with the LastFM data set, there aren't enough usable versions applicable for a comparative graph based deep learning music recommendation approach. As a result, this limitation has formed a barrier in the ability to reproduce many modern recommendation system papers, especially for beginner researchers. 
+
+\subsection{LastFM1b Data set}
+
+The LastFM1b data set provides more information that can be utilized in a deep learning scenario. Therefore, to alleviate the issue, I will outline the methodological approaches used to create an optimized method for generating a LastFM1b music recommendation data loader in the deep graph library frame. 
+
+Uniquely, the LastFM1b is not utilized as often as its famous predecessor LastFM data sets. This can be speculated on, however regardless of the applications of the different data sets, the variety of the recorded information is what makes the LastFM1b data set useful for this project. 
+
+As the traditional LastFM data sets offer information on user to artists listening behaviors. The LastFM1b data set also incorporates user listening behavior for tracks and albums. The significance of incorporating this information in large deep learning graphs to discern an observable performance difference between the impact of incorporating albums and tracks is not well studied. \cite{hgRepAndApp2022} \cite{Schedl2016}
+
+As a result, the LastFM data set has been utilized much more than the modernized LastFM1b data set in recent years. In fact, the LastFM1b data set is indeed outdated. The LastFM2b data set was released in September of 2021 and offers even more information than that of the 1b data set. This will be addressed later in the conclusions of this thesis.
+
+
+Given that of the available data sets in the most popular graph neural network frameworks do not utilize the LastFM1b data set. Implementing a custom data loader, that can be utilized by graph based deep learning communities, increase the necessary exposure the MRS community needs to stay relevant in the field of graph based deep learning, but it would provide contextual information of user interaction behavior with more than users and artist connections. In combination this would allow the music recommendation research community to utilize and understand the impact of diversifying the relational information that is collected in the LastFM1b data set.
+
+\subsection{Data Loading}
+
+For the given objective, a custom in memory Deep Graph Library (DGL) data set would properly expose the music recommendation community to one of the most popular graph based deep learning communities. To implement this, a large devotion to deep graph library framework is a prerequisite. The reasoning for this choice is due to the already existing LFM4k data set in the Pytorch geometric library, therefore to diversify the exposure of data sets amongst professionals, selecting a framework that does not have a music recommendation data set loader is a proper choice.
+
+Before outlining the implementation with respect to the DGL framework, its important to understand the demographics and structure of the LastFM1b data set which can be downloaded at the publishing website's location. Inside the downloadable zip folder there are text files corresponding to the following information: users, artists, albums, tracks, and the one billion listening events. Additionally, the data set can be downloaded with the accompaniment of the LastFM1b UGP data set which analyzes the tags or genres of the artists, and users. The authors of the data set have published a distributional analysis on the website which is useful for those interested in the specific features and structure of the physical data set. \cite{Schedl2016}
+
+As discussed in the state of the art, the deep graph library (DGL) provides a popularize frame for computing graph-based machine learning tasks on complex heterogeneous graphs. In DGL a customizable class made for custom in memory data sets can be used properly when a handful of key functions are. These include a load(), save(), and a process() function. The save() and load() functions simply work with reading and writing the final representations of the compiled heterogeneous graph to and from memory. The process() function however is the brains of the data loading functions.
+
+When the process() function is called a large number of operations are required to read through the LastFM1b data set and compile one singular graph data object. Specifically these processes can be divide into three parts. \subsection{Compiling DGL Graph Data} To load a heterogeneous graph using the python deep graph library framework, it is required to collect a dictionary of every edge that exists in the graph. 
+
+
+% The structure of a graph data dictionary is as follows
+
+% graph data ={
+
+% 'node_type': tensor(source_node_ids), tensor(destination_node_ids), 
+% ...
+% ...
+
+% }
+
+% Where all the ids for every node start at 0 and end at Nt, and N is the number of nodes of node type t. 
+
+Notice that this information is not structured like a typical adjacency matrix, this is due to the large storage space that it requires to compile an adjacency matrix of millions if not billions of nodes. Therefore, an adjacency list is not so harsh on memory allocation.
+
+% hg = dgl.HeteroGraph(graphData)
+% (Picture of output)
+
+As a technical note on the structural representation of the graph. There is not an edge connection provided for track to albums. The justification for this resides in the structure of the LastFM1b files.  This is particularly not computed since the information of track and album occurrences can only be evaluated through filtering of the listen events file. This is uniquely cumbersome as it is not listed in the track or album listings.
+
+\subsection{Compiling DGL Node Data}
+Once the graph data has been loaded into memory, the next task before the processing function finishes, is to add features to the nodes and edges of the graph. This step can be done in a variety of different ways. Notably at this step in the process, since the LastFM1b provided just the names of the artists, tracks, and albums, we can't not utilize audio or other digital signal processing methodologies to provide input embedding representations for the artist, album, or track nodes. As the information that is provided in the LastFM1b is not particularly expressive for the artists, albums, or tracks. Utilizing the limited features for node features for input into our models would not provide the optimal outcome in our results. As a result, there are no expressive features that can be utilized to compute node embedding representations through machine learning. However as described earlier in the thesis, implicit information is often utilized in recommendation systems as explicit information is traditionally sparse in nature.
+
+
+\subsubsection{Compiling DGL Node Data}
+% (Picture of Metapath2vec)
+
+The metapath2vec method \cite{dong2017metapath2vec} was published in 2017 to challenge this issue and propose a solution to finding a resourceful way to preserve node context in heterogeneous networks node embedding representations. The published work offered a solution to the issue of heterogeneous graphs having irregular, or sparse collections of explicit features. The preserved node context in the final embedding representations were observed to improve downstream graph learning tasks like node classification, link prediction, clustering, and graph classification. The metapath2vec method can capture semantic and structural relationships between different types of nodes by preforming random walks operations over a specified heterogeneous meta path. As a result, many different heterogeneous graph models utilize the final embedding representations of the nodes generated by the metapath2vec model as inputs into a deep learning model for different prediction tasks.  \cite{dong2017metapath2vec}
+
+
+% hg.nodes[nodeType].data[featureName]=metapath2vec.embeddings[nodeType]
+
+The metapath2vec algorithm can be applied to the LastFM1b graph object to compute high quality node embedding representations as inputs into a deep learning model. Allowing for our later discussed deep learning models to utilize the node features that are structurally and graphically aware to each other for downstream prediction tasks.
+
+As a note on metapath2vec, users and items interactions should be more emphasized than other types of interactions in the graph. This is because for our recommendation task, the objective is to provide recommendation of artists, albums, and tracks to users. Therefore, only user item meta-paths are selected for the random walk sequence, which has been shown to improve downstream node embedding representations. \cite{hgRepAndApp2022}
+
+
+\subsection{Compiling DGL Edge Data}
+Different than the previously described node representations, the edge data must be added to the graph. Specifically, two different approaches that can be made to add edge data to our graph. Firstly, in a user listen database an edge from a user to an artist, album, or track can be represented by multiple edges, each denoted with a timestamp. Alternatively, the edges from a particular user can be denoted as one edge with a weight of the number of interactions had with (number of times the user listened to) a particular artist, album, or track. Additionally, this value can be normalized as it is true that some users will listen specific artists, albums, or tracks in an unbalanced manner.
+
+Therefore, this implementation of a DGL LastFM1b Data loader offers a compiled graph compatible with either form of edge representation. To specify which form of representation is needed to compile, bash script arguments can be added to commands.
+
+
+% (image of different edge data methods)
+
+% hg.edges[edgeType].data[normPlaycount]=normPlaycounts
+% hg.edges[edgeType].data[playcount]=playcounts
+
+% or 
+
+% hg.edges[edgeType].data[timestamp]=timestamps
+
+As a notice on the play count and timestamp edge data implementation, the weight values and timestamps only exist for edges connection users to artists, albums, and tracks. For edges in the heterogeneous graph that are outside of this set, there is just a tensor of ones to represent no weight, or no information at all to represent no timestamp.

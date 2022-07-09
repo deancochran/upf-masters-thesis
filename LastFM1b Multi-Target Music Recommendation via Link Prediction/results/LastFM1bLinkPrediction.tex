@@ -1,0 +1,61 @@
+\section{LastFM1b Link Prediction}
+
+
+\subsection{Preliminary Findings}
+
+From each type of subset created (just one) only one link prediction model for RGCN or RHGNN can be made, user to artist link prediction, on a LastFM1b data set.
+
+This significantly limits the results from this section of the chapter as the results for the link prediction models can only be created from the subset of users, artists, and genres, where the number of users is below 50.
+
+
+\begin{table}[!ht]
+\renewcommand{\arraystretch}{1.50}
+\caption{Evaluation of User to Artist LFM1b Link Prediction on Artist Genre Subset}
+\label{tablePCA}
+\centering
+\begin{tabular}{| c | c | c | c | c | c |}
+\hline
+\bfseries Edge Type & \bfseries Accuracy & \bfseries Precision & \bfseries MAE & \bfseries RMSE \\
+\hline
+\hline
+RGCN & 0.9202 & na & na & na   \\
+\hline
+RHGNN & 0.9873 & 0.9905 & 0.0925 & 0.291   \\
+\hline
+\end{tabular}
+\end{table}
+
+From these overly optimistic results, the RGCN model, implemented through the OpenHGNN GitHub repository, and the implemented RHGNN model share an extremely accurate and precise prediction capabilities for the LastFM1b user to artist edge. Though To accompany this observation, it begs, let alone warrants the use of a visualization of the loss curve.
+
+
+\begin{figure}[!ht]
+    \includegraphics[clip,width=\columnwidth]{Figures/listened_to_artist_ap_plot.png}% 
+\caption{This is the RHGNN precision performance over time}
+\label{fig:timeseries}
+\end{figure}
+
+\begin{figure}[!ht]
+    \includegraphics[clip,width=\columnwidth]{Figures/listened_to_artist_auc_plot.png}% 
+\caption{This is the RHGNN accuracy performance over time}
+\label{fig:timeseries}
+\end{figure}
+
+\begin{figure}[!ht]
+    \includegraphics[clip,width=\columnwidth]{Figures/listened_to_artist_mae_plot.png}% 
+\caption{This is the RHGNN Mean Absolute Error performance over time}
+\label{fig:timeseries}
+\end{figure}
+
+\begin{figure}[!ht]
+    \includegraphics[clip,width=\columnwidth]{Figures/listened_to_artist_rmse_plot.png}% 
+\caption{This is the RHGNN Root Mean Squared Error performance over time}
+\label{fig:timeseries}
+\end{figure}
+
+\begin{figure}[!ht]
+    \includegraphics[clip,width=\columnwidth,]{Figures/listened_to_artist_loss_plot.png}% 
+\caption{This is the RHGNN Loss performance over time}
+\label{fig:timeseries}
+\end{figure}
+
+From these figures is can be observed that the model appears to be generalizing the training information well and not over-fitting. However, do to the noticeably high prediction scores of the accuracy in precision. The overly optimistic results do appear to show ideal training results. While proper results are not necessarily a requirement, it is a large concern that should be validated with further testing. Current ideas of why the accuracy and precision is so high is due to the small subset of users that are required to compile the graph into memory. Additionally, as it could be possible, there may be small data leakage inside the training step that could have allowed the model to learn the downstream validation or testing prediction tasks during training. Further studies, or the support of more memory for allocation would greatly support the completion of these findings.

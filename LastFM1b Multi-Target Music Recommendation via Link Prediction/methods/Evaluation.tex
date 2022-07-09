@@ -1,0 +1,37 @@
+% Evaluation (metrics, hyperparameters optimization, etc.)
+\section{Evaluation}
+
+To conclude the chapter on logistical approaches used for achieve the objectives of the thesis. As well to provide validation for the proposed methods chosen. Evaluation of the various results provided by the LastFM1b data loader, the LastFM1b link prediction models, and the LastFM1b recommendations is required.
+
+In order to provide justification for the choose evaluation measures. This section of the methodology will identify the chosen quantitative and qualitative metrics that will be used to evaluate this thesis.
+
+\subsection{Evaluation of the LastFM1b Data loader}
+
+The LastFM1b data loader implemented in the Deep Graph Library frame provides many customizes features. Most notably, the data loader provides the option of specifying a subset of the types of nodes desired in the compiled graph. The data loader also provides additional subset capabilities as the number of users represented in the compiled graph can be specified. 
+
+These complementary features are resourceful for researchers, as compiling the full LastFM1b heterogeneous graph in memory can take quite a long time to compute. To list the remaining features of the data loader: the metapath2vec classifier for the node embedding representations has customizable hyper parameters, the metapath2vec classifier can be turned off, the GPU to compile the information can be specified, and the overwrite functions can be ignored if specified.
+
+To evaluate this data set and the capabilities it holds, a distributional comparison study of the DGL data loader can be performed. A comparison is particularly required, as to compile the full LastFM1b data set or any of the subsets made available. There are a significant number of removed instances of artists, tracks, albums, and listen events from the original data set. The reasoning for doing so, was so that the resulting LastFM1b data from the DGL data loader could represent a fully connected graph.
+
+
+\subsection{Evaluation of the RHGNN Link Prediction}
+
+The purpose for evaluating the link models trained on the LastFM1b data set, is not only to validate the model, rather it is also to validate the significance of incorporating additional contextual information inside a heterogeneous, ergo not just graph between users, artists, and genres.
+
+With this objective driving the primary focus of evaluating link prediction on the LastFM1b data set there are a collection of measures that should be presented a deep learning models’ effectiveness to predict. To evaluate the link prediction models for each user interaction edge type (user-to-album, user-to-track, and user-to-artist), as well as for each model type (RHGNN and RGCN), the accuracy, precision, and error will be compared between the model types. Additionally, a comparison of these six model types can be compared for each type of LastFM1b subset, for each number of users able to be computed.
+
+To put these evaluations into perspective, the evaluation could provide statistical results for every model type (2 possible types), every edge type (3 possible types), and every subset type (6 possible types), for a total of 36 unique results for a full evaluation on the LastFM1b data loader with all possible users.
+
+
+\subsection{Evaluation of the RHGNN Heterogeneous Recommendation}
+
+As the result of the contributions made in throughout this thesis, and the trained models that are compiled for link prediction of the different user interaction edge types. The final task is form recommendations for any user in the computed graph. To preform evaluation on these recommendations, different evaluation metrics must be utilized to form an understanding on the recommendation performance. 
+
+Since the recommendations for any LastFMb1b input graph is computed by forming predictions from the precompiled link prediction models. Each link prediction model, in addition to the standard evaluation metrics as mentioned above, will require additional evaluation of the predictions.
+
+To evaluate the link prediction model as a recommendation model, the prediction for all unseen edges that model predicts for will be ranked such that, for the top-K recommendations the different models can be evaluated for their accuracy, precision, diversity, coverage, and novelty @K recommendations.
+
+
+The significance of evaluating a recommendation system in this manner is justified when mentioning that accuracy is not an expressive measurement of recommendation systems. Rather that, accuracy is an adequate measurement of relevancy, diversity is an adequate measurement of uniqueness, precision is a measurement of consistency, novelty is a measurement of newness, and coverage is a measurement of the capable reach of recommendation systems. These descriptive statistics will be able to provide explanation for the types of recommendation received using this approach.
+
+Finally, as a special case, each of these model’s top-K recommendations can be combined and ranked into a multi target recommendation list for users which can be evaluated in a similar way. The unique difference of this approach is the introduction of additional metrics to evaluate the distributions of unique types of track, album, artists can be observed in the recommendation listings.
