@@ -4,9 +4,7 @@ import itertools
 import json
 import os
 import pandas as pd
-from pydantic import NoneIsAllowedError
 import torch as th
-from copy import deepcopy
 
 from train import train_models
 from DGL_LFM1b.DGL_LFM1b import LFM1b
@@ -20,17 +18,17 @@ class Dict2Class(object):
 
 args_range_dict={
     'seed':[0],
-    'sample_edge_rate':[.1],
+    'sample_edge_rate':[.01],
     'num_layers':[2],
     'batch_size':[512],
-    'num_neg_samples': [5],
+    'num_neg_samples': [10],
     'node_min_neighbors':[10],
     'shuffle':[True],
     'drop_last':[False],
     'num_workers':[4],
-    'hidden_dim':[32],
-    'rel_input_dim':[12],
-    'rel_hidden_dim':[32],
+    'hidden_dim':[16],
+    'rel_input_dim':[8],
+    'rel_hidden_dim':[16],
     'num_heads':[8],
     'dropout':[.5,],
     'residual':[True],
@@ -38,7 +36,7 @@ args_range_dict={
     'opt':['adam'],
     'weight_decay':[0.0],
     'epochs':[100],
-    'patience':[25],
+    'patience':[10],
     'split_by_users':[True],
     'device':['cuda'],
     'artists':[True, False],
@@ -47,15 +45,15 @@ args_range_dict={
     'playcount_weight':[False],
     'norm_playcount_weight':[False],
     'metapath2vec':[True],
-    'emb_dim':[32],
+    'emb_dim':[8],
     'walk_length':[64],
     'context_size':[7],
-    'walks_per_node':[3],
-    'metapath2vec_epochs_batch_size':[128],
+    'walks_per_node':[1],
+    'metapath2vec_epochs_batch_size':[512],
     'learning_rate':[0.001],
     'metapath2vec_epochs':[5],
     'logs':[100],
-    'n_users':[50,25,10],
+    'n_users':[10],
     'popular_artists':[True],
 
 }
@@ -70,7 +68,10 @@ permutations_args = [dict(zip(keys, v)) for v in itertools.product(*values)]
 
 for user_size in args_range_dict['n_users']:
     for i, arg_perm in enumerate([perm for perm in permutations_args if Dict2Class(perm).n_users==user_size]):
+        print('running with args')
+        print(arg_perm)
         args=Dict2Class(arg_perm)
+        
         try:
             if (i==0):
                 print('OVERWRITING PREPROCESSED')
@@ -148,13 +149,15 @@ results_data={
     'path_to_ap_img':[],
     'path_to_hit_img':[],
     'path_to_div_img':[],
+    'path_to_cov_img':[],
     'path_to_pkl':[],
     'RMSE':[],
     'MAE':[],
     'AUC':[],
     'AP':[],
     'HIT':[],
-    'DIV':[],    
+    'DIV':[], 
+    'COV':[],   
     'seed':[],
     'sample_edge_rate':[],
     'num_layers':[],
@@ -199,7 +202,12 @@ for result_folder in os.listdir(results_dir):
     for model_folder in os.listdir(single_result_dir):
         try:
             metrics = json.load(open(single_result_dir+f'/{model_folder}/metrics.json'))
-            params=['AUC','AP','RMSE','MAE','HIT','DIV']
+            params=['AUC','AP','RMSE','MAE','HIT','DIV','COV']
+            for param in params:
+                results_data[param].append(metrics[param])
+
+            rec_metrics = json.load(open(single_result_dir+f'/{model_folder}/rec_metrics.json'))
+            params=['avg_artist_dist','avg_album_dist','avg_track_dist']
             for param in params:
                 results_data[param].append(metrics[param])
             
@@ -256,6 +264,7 @@ for result_folder in os.listdir(results_dir):
             results_data['path_to_ap_img'].append(single_result_dir+f'/{model_folder}/{model_folder}_ap_plot.png')
             results_data['path_to_hit_img'].append(single_result_dir+f'/{model_folder}/{model_folder}_hit_plot.png')
             results_data['path_to_div_img'].append(single_result_dir+f'/{model_folder}/{model_folder}_div_plot.png')
+            results_data['path_to_cov_img'].append(single_result_dir+f'/{model_folder}/{model_folder}_cov_plot.png')
             results_data['path_to_pkl'].append(single_result_dir+f'/{model_folder}/{model_folder}.pkl')
         except Exception as e:
             print(e)

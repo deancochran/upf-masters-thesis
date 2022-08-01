@@ -1,7 +1,9 @@
 import copy
+import pandas as pd
 from operator import itemgetter
 import numpy as np
 import random
+from sklearn.cluster import k_means
 import torch as th
 import torch.nn as nn
 import dgl
@@ -87,23 +89,15 @@ def get_predict_edge_index(graph: dgl.DGLGraph, sampled_edge_type: str or tuple,
     get predict edge index, return train_edge_idx, valid_edge_idx, test_edge_idx
     :return:
     """
+
     torch.manual_seed(seed=seed)
-    print('splitting by users')
-    selected_edges_num = int(graph.num_nodes('user') * sample_edge_rate)
-    permute_idx = torch.randperm(graph.num_nodes('user'))
-    user_train_edge_idx = permute_idx[: 3 * selected_edges_num]
-    user_valid_edge_idx = permute_idx[3 * selected_edges_num: 4 * selected_edges_num]
-    user_test_edge_idx = permute_idx[4 * selected_edges_num: 5 * selected_edges_num]
-    src_dst_edges=graph.find_edges(torch.arange(graph.number_of_edges(sampled_edge_type), dtype=torch.int64), sampled_edge_type)
-    train_edge_idx=[]
-    for user in user_train_edge_idx:
-        train_edge_idx+=[i for i,src in enumerate(src_dst_edges[0]) if user==src]
-    valid_edge_idx=[]
-    for user in user_valid_edge_idx:
-        valid_edge_idx+=[i for i,src in enumerate(src_dst_edges[0]) if user==src]
-    test_edge_idx=[]
-    for user in user_test_edge_idx:
-        test_edge_idx+=[i for i,src in enumerate(src_dst_edges[0]) if user==src]
+
+    selected_edges_num = int(graph.number_of_edges(sampled_edge_type) * sample_edge_rate)
+    permute_idx = torch.randperm(graph.number_of_edges(sampled_edge_type))
+
+    train_edge_idx = permute_idx[: 3 * selected_edges_num]
+    valid_edge_idx = permute_idx[3 * selected_edges_num: 4 * selected_edges_num]
+    test_edge_idx = permute_idx[4 * selected_edges_num: 5 * selected_edges_num]
 
     return train_edge_idx, valid_edge_idx, test_edge_idx
 
@@ -183,19 +177,13 @@ def evaluate_link_prediction(predict_scores: torch.Tensor, true_scores: torch.Te
     return RMSE, MAE, AUC, AP
 
 
-def evaluate_link_recommendation(predict_scores: torch.Tensor, true_scores: torch.Tensor, dst_node_representations: torch.Tensor, src_node_ids: torch.Tensor, dst_node_ids: torch.Tensor, K=25):
+def evaluate_link_recommendation(predict_scores: torch.Tensor, true_scores: torch.Tensor, dst_node_representations: torch.Tensor, src_node_ids: torch.Tensor, dst_node_ids: torch.Tensor, K=10):
     """
     get evaluation metrics for link prediction
     :param predict_scores: Tensor, shape (N, )
     :param true_scores: Tensor, shape (N, )
     :return: 
     """
-    # print('predict_scores',predict_scores.shape)
-    # print('true_scores',true_scores.shape) 
-    # print('dst_node_representations',dst_node_representations.shape)
-    # print('src_node_ids',src_node_ids.shape)
-    # print('dst_node_ids',dst_node_ids.shape)
-
     ranked_info={
         'user':list(),
         'target':list(),
@@ -212,127 +200,79 @@ def evaluate_link_recommendation(predict_scores: torch.Tensor, true_scores: torc
 
     HIT=get_HIT_score(ranked_info,K)
     DIV=get_DIV_score(ranked_info,K)
-    # CONF=get_CONF_score(ranked_info,K)
-    # COV=get_COV_score(ranked_info,K)
-    # NOV=get_NOV_score()
+    COV=get_COV_score(ranked_info,K)
 
-    return HIT, DIV
+    return HIT, DIV, COV
 
-def get_user_HITscore(user, ranked_info,K):
+def get_user_HITscore(rankedUserInfo):
     user_HITs=0
-    total=0
-    index=0
-    while total!=K and index < len(ranked_info['user']):
-        row_user=ranked_info['user'][index]
-        row_true=ranked_info['true'][index]
-        if user==row_user:
-            # print(row_user,row_score,row_true)
-            if row_true==1:
-                user_HITs+=1
-            total+=1
-        index+=1
-    # print(f'hit @ {K} for user {user}',user_HITs/total)
-    return user_HITs/total
+    for i, val in rankedUserInfo['true'].items():
+        if val==1:
+            user_HITs+=1
+
+    return user_HITs/len(rankedUserInfo['true'])
 
 def get_HIT_score(ranked_info,K):
     user_list= np.unique(ranked_info['user'])
     total_hit_score=0
     for user in user_list:
-        if ranked_info['user'].count(user) >= K:
-            total_hit_score+=get_user_HITscore(user, ranked_info, K)
-    # print(f'HIT @ {K} for ALL users',total_hit_score/len(user_list))
+        rankedUserInfo=get_user_ranked_info(user, ranked_info, K)
+        total_hit_score+=get_user_HITscore(rankedUserInfo)
     return total_hit_score/len(user_list)
 
 
-def get_user_DIVscore(user, ranked_info,K):
+def get_user_DIVscore(rankedUserInfo):
     cosi = torch.nn.CosineSimilarity(dim=0)
-    list_indicies=[]
-    total=0
-    index=0
-    while total!=K and index < len(ranked_info['user']):
-        row_user=ranked_info['user'][index]
-        if user==row_user:
-            # print(row_user,row_score,row_true)
-            list_indicies.append(index)
-            total+=1
-        index+=1
     i_sum=0
-    for i in list_indicies:
+    for i_index, i_emb in rankedUserInfo['feat'].items():
         j_sum=0
-        for j in [val for val in list_indicies if val!=i]:
-            dissimilarity=1-cosi(ranked_info['feat'][i],ranked_info['feat'][j])
-            j_sum+=dissimilarity
+        for j_index, j_emb in rankedUserInfo['feat'].items():
+            if j_index!=i_index:
+                dissimilarity=1-cosi(i_emb,j_emb)
+                j_sum+=dissimilarity
         i_sum+=j_sum
-    n=len(list_indicies)
+    n=len(rankedUserInfo['user'])
     factorizer=2/(n*(n-1))
-
-    # print(f'hit @ {K} for user {user}',user_HITs/total)
     return factorizer*i_sum
 
 def get_DIV_score(ranked_info,K):
     user_list= np.unique(ranked_info['user'])
     total_div_score=0
     for user in user_list:
-        if ranked_info['user'].count(user) >= K:
-            total_div_score+=get_user_DIVscore(user, ranked_info, K)
-    # print(f'DIV @ {K} for ALL users',total_div_score/len(user_list))
+        rankedUserInfo=get_user_ranked_info(user, ranked_info, K)
+        total_div_score+=get_user_DIVscore(rankedUserInfo)
     return total_div_score/len(user_list)
 
+def get_user_COVtargets(rankedUserInfo):
+    user_target_ids=[]
+    for _, target in rankedUserInfo['target'].items():
+        user_target_ids.append(target)
+    return user_target_ids
 
-
-# def get_user_CONFscore(user, ranked_info,K):
-#     user_confidences=0
-#     total=0
-#     index=0
-#     while total!=K and index < len(ranked_info['user']):
-#         row_user=ranked_info['user'][index]
-#         row_score=ranked_info['score'][index]
-#         if user==row_user:
-#             # print(row_user,row_score,row_true)
-#             user_confidences+=row_score
-#             total+=1
-#         index+=1
-#     # print(f'hit @ {K} for user {user}',user_HITs/total)
-#     return user_confidences/total
-
-# def get_CONF_score(ranked_info,K):
-#     user_list= np.unique(ranked_info['user'])
-#     total_conf_score=0
-#     for user in user_list:
-#         if ranked_info['user'].count(user) >= K:
-#             total_conf_score+=get_user_CONFscore(user, ranked_info, K)
-#     print(f'CONF @ {K} for ALL users',total_conf_score/len(user_list))
-#     return total_conf_score/len(user_list)
+def get_COV_score(ranked_info,K):
+    user_list= np.unique(ranked_info['user'])
+    found_targets=[]
+    for user in user_list:
+        rankedUserInfo=get_user_ranked_info(user, ranked_info, K)
+        found_targets+=get_user_COVtargets(rankedUserInfo)
+    all_target_ids = np.unique([ranked_info['target'][i] for i, row_true in enumerate(ranked_info['true']) if row_true==1])
+    matching_ids=0
+    found_targets=np.unique(found_targets)
+    for id in found_targets:
+        if id in all_target_ids:
+            matching_ids+=1
+    return matching_ids/len(all_target_ids)
 
 
 
-# def get_user_COVscore(user, ranked_info,K):
-#     user_target_ids=[]
-#     while index < len(ranked_info['user']):
-#         row_user=ranked_info['user'][index]
-#         row_target=ranked_info['target'][index]
-#         row_true =ranked_info['true'][index]
-#         row_true =ranked_info['true'][index]
-#         if user==row_user:
-#             if row_true==1:
-#                 user_target_ids.append(row_target)
-#         index+=1
-#     print(user_target_ids)
-#     return user_target_ids
+def get_user_ranked_info(user, ranked_info, K):
+    #filter for a specific user
+    user_ranked_info = {k: [x for i, x in enumerate(v) if ranked_info['user'][i] == user] for k, v in ranked_info.items()}
+    # sort dataframe by score 
+    user_ranked_info = pd.DataFrame(user_ranked_info).sort_values(by='score', ascending=False).drop_duplicates(subset='target').reset_index(drop = True)
+    # splice by K
+    # print(user_ranked_info.head(K))
+    return user_ranked_info.head(K).to_dict()
 
-# def get_COV_score(ranked_info,K):
-#     user_list= np.unique(ranked_info['user'])
-#     found_targets=[]
-#     for user in user_list:
-#         if ranked_info['user'].count(user) >= K:
-#             found_targets+=get_user_COVscore(user, ranked_info, K)
-#     all_target_ids = [ranked_info['target'][i] for i, row_true in enumerate(ranked_info['true']) if row_true==1]
-#     print('all_target_ids',all_target_ids)
-#     print('found_targets',found_targets)
-#     matching_ids=0
-#     for id in found_targets:
-#         if id in all_target_ids:
-#             matching_ids+=1
+    
 
-#     print(f'COV @ {K} for ALL users',matching_ids/len(all_target_ids))
-#     return matching_ids/len(all_target_ids)

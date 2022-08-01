@@ -608,7 +608,6 @@ class R_HGNN(nn.Module):
         :param device: device str
         """
         with torch.no_grad():
-
             if relation_embedding is None:
                 relation_embedding = {}
                 for etype in self.relation_embedding:
@@ -634,8 +633,9 @@ class R_HGNN(nn.Module):
                     drop_last=False,
                     num_workers=4)
 
-                tqdm_dataloader = tqdm(dataloader, ncols=120)
-                for batch, (input_nodes, output_nodes, blocks) in enumerate(tqdm_dataloader):
+                # tqdm_dataloader = tqdm(dataloader, ncols=120)
+                # for batch, (input_nodes, output_nodes, blocks) in enumerate(tqdm_dataloader):
+                for batch, (input_nodes, output_nodes, blocks) in enumerate(dataloader):
                     block = blocks[0].to(device)
 
                     # for relational graphs that only contain a single type of nodes, construct the input and output node dictionary
@@ -660,8 +660,8 @@ class R_HGNN(nn.Module):
                         y[(stype, reltype, dtype)][output_nodes[dtype]
                                                    ] = h[(stype, reltype, dtype)].cpu()
 
-                    tqdm_dataloader.set_description(
-                        f'inference for the {batch}-th batch in model {index}-th layer')
+                    # tqdm_dataloader.set_description(
+                    #     f'inference for the {batch}-th batch in model {index}-th layer')
 
                 # update the features of all the nodes (after the graph convolution) in the whole graph
                 relation_target_node_features = y
