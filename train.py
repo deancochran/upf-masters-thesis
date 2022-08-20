@@ -468,44 +468,44 @@ def train_models(hg, args):
     del test_loader
 
 
-    print('model traing finished, making multi-target recommendationn evaluations')
-    results_root_path='results/'
-    K=10
-    user_arr = hg.nodes('user')
-    total_dists={}
-    edge_type_list=[name.split('_')[-1] for name in found_sampled_edge_types]
-    for edge_type in edge_type_list:
-        total_dists[edge_type]=0
-    user_loader=tqdm(user_arr, total=len(user_arr))
-    for user in user_loader:
-        recommendations={'type':[],'score':[]}
-        for sampled_edge_type, edge_type in zip(found_sampled_edge_types,edge_type_list):
-            th.cuda.empty_cache()
-            user_loader.set_description(f'User id #{user} {sampled_edge_type} recommendations')
-            topK=get_user_recommendations(hg,  date, sampled_edge_type, results_root_path, user, K)
-            for _, score in topK.items():
-                recommendations['type'].append(edge_type)
-                recommendations['score'].append(score)
-        userDf=pd.DataFrame(recommendations).sort_values(by='score', ascending=False).reset_index(drop = True).head(K)
-        typeDistributions = userDf.value_counts("type",normalize=True)
-        for edge_type in edge_type_list:
-            total_dists[edge_type]+=typeDistributions[edge_type]
-    avg_dists={}
-    for edge_type in edge_type_list:
-        avg_dists[edge_type]=total_dists[edge_type]/len(user_arr)
-    scores={}
-    for type in ['track','album','artist']:
-        if type in avg_dists.keys():
-            scores[f"avg_{edge_type}_dist"]=float(f"{avg_dists[edge_type]:.4f}")
-        else:
-            scores[f"avg_{edge_type}_dist"]=np.nan
+    # print('model traing finished, making multi-target recommendationn evaluations')
+    # results_root_path='results/'
+    # K=10
+    # user_arr = hg.nodes('user')
+    # total_dists={}
+    # edge_type_list=[name.split('_')[-1] for name in found_sampled_edge_types]
+    # for edge_type in edge_type_list:
+    #     total_dists[edge_type]=0
+    # user_loader=tqdm(user_arr, total=len(user_arr))
+    # for user in user_loader:
+    #     recommendations={'type':[],'score':[]}
+    #     for sampled_edge_type, edge_type in zip(found_sampled_edge_types,edge_type_list):
+    #         th.cuda.empty_cache()
+    #         user_loader.set_description(f'User id #{user} {sampled_edge_type} recommendations')
+    #         topK=get_user_recommendations(hg,  date, sampled_edge_type, results_root_path, user, K)
+    #         for _, score in topK.items():
+    #             recommendations['type'].append(edge_type)
+    #             recommendations['score'].append(score)
+    #     userDf=pd.DataFrame(recommendations).sort_values(by='score', ascending=False).reset_index(drop = True).head(K)
+    #     typeDistributions = userDf.value_counts("type",normalize=True)
+    #     for edge_type in edge_type_list:
+    #         total_dists[edge_type]+=typeDistributions[edge_type]
+    # avg_dists={}
+    # for edge_type in edge_type_list:
+    #     avg_dists[edge_type]=total_dists[edge_type]/len(user_arr)
+    # scores={}
+    # for type in ['track','album','artist']:
+    #     if type in avg_dists.keys():
+    #         scores[f"avg_{edge_type}_dist"]=float(f"{avg_dists[edge_type]:.4f}")
+    #     else:
+    #         scores[f"avg_{edge_type}_dist"]=np.nan
 
-    final_result = json.dumps(scores, indent=4)
-    save_result_dir= f"results/lfm1b/{date}/{sampled_edge_type}"
-    save_recs_path = os.path.join(save_result_dir, f"rec_metrics.json")
-    with open(save_recs_path, 'w') as file:
-        file.write(final_result)
-        file.close()
+    # final_result = json.dumps(scores, indent=4)
+    # save_result_dir= f"results/lfm1b_rec/{date}"
+    # save_recs_path = os.path.join(save_result_dir, f"rec_metrics.json")
+    # with open(save_recs_path, 'w') as file:
+    #     file.write(final_result)
+    #     file.close()
 
     
     

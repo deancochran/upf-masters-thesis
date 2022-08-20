@@ -53,7 +53,7 @@ args_range_dict={
     'learning_rate':[0.001],
     'metapath2vec_epochs':[5],
     'logs':[100],
-    'n_users':[10],
+    'n_users':[25],
     'popular_artists':[True],
 
 }
@@ -206,10 +206,10 @@ for result_folder in os.listdir(results_dir):
             for param in params:
                 results_data[param].append(metrics[param])
 
-            rec_metrics = json.load(open(single_result_dir+f'/{model_folder}/rec_metrics.json'))
-            params=['avg_artist_dist','avg_album_dist','avg_track_dist']
-            for param in params:
-                results_data[param].append(metrics[param])
+            # rec_metrics = json.load(open(single_result_dir+f'/{model_folder}/rec_metrics.json'))
+            # params=['avg_artist_dist','avg_album_dist','avg_track_dist']
+            # for param in params:
+            #     results_data[param].append(metrics[param])
             
             args = json.load(open(single_result_dir+f'/{model_folder}/args.json'))
             params=[
